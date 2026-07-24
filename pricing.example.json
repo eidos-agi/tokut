@@ -1,0 +1,12 @@
+{
+  "rates": [
+    {
+      "provider": "openai",
+      "model_prefix": "example-model",
+      "input_per_million": 1.0,
+      "cached_input_per_million": 0.1,
+      "output_per_million": 5.0,
+      "source": "example_custom_rate"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "name": "tokut",
+  "version": "0.1.0",
+  "description": "Watch live local AI token burn and API-equivalent cost across OpenAI, Anthropic, and Google logs.",
+  "author": {
+    "name": "Eidos AGI",
+    "email": "hello@eidosagi.com",
+    "url": "https://github.com/eidos-agi"
+  },
+  "homepage": "https://github.com/eidos-agi/tokut",
+  "repository": "https://github.com/eidos-agi/tokut",
+  "license": "MIT",
+  "keywords": [
+    "tokens",
+    "ai-cost",
+    "codex",
+    "claude-code",
+    "gemini-cli",
+    "dashboard",
+    "eidos-agi"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Tokut",
+    "shortDescription": "Live local AI token burn and cost dashboard.",
+    "longDescription": "Tokut watches local OpenAI Codex, Anthropic Claude Code, and Google Gemini CLI session logs to show live token burn, model and project breakdowns, subscription-covered theoretical cost, API/overage exposure, and provider/account filters. It is read-only and treats local logs as burn evidence, not invoices.",
+    "developerName": "Eidos AGI",
+    "category": "Developer Tools",
+    "capabilities": [
+      "local log monitoring",
+      "token burn analytics",
+      "API-equivalent cost estimates",
+      "subscription mapping",
+      "read-only dashboard"
+    ],
+    "websiteURL": "https://github.com/eidos-agi/tokut",
+    "privacyPolicyURL": "https://github.com/eidos-agi/tokut",
+    "termsOfServiceURL": "https://github.com/eidos-agi/tokut",
+    "defaultPrompt": [
+      "Use Tokut to start a live token burn dashboard.",
+      "Use Tokut to explain which project is burning the most tokens.",
+      "Use Tokut to check actual API/overage exposure versus subscription-covered burn."
+    ],
+    "brandColor": "#34D399"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "accounts": [
+    {
+      "provider": "codex",
+      "account": "default",
+      "company": "Example Company",
+      "subscription": "ChatGPT Team",
+      "plan": "Team",
+      "billing_mode": "subscription",
+      "notes": "Subscription token burn is shown as API-equivalent theoretical cost with actual cost $0."
+    },
+    {
+      "provider": "claude",
+      "account": "work",
+      "company": "Example Company",
+      "subscription": "Claude Max",
+      "plan": "Max",
+      "billing_mode": "subscription"
+    },
+    {
+      "provider": "gemini",
+      "account": "api",
+      "company": "Example Company",
+      "subscription": "Gemini API",
+      "plan": "API",
+      "billing_mode": "api_billed",
+      "notes": "API-billed token burn is counted in the paid bottom series."
+    },
+    {
+      "provider": "grok",
+      "account": "default",
+      "company": "Example Company",
+      "subscription": "SuperGrok",
+      "plan": "SuperGrok",
+      "billing_mode": "subscription",
+      "included": {
+        "period": "week",
+        "allowance_usd": 200,
+        "notes": "List-price equivalent covered by plan credits (discounted). Set from your weekly pool value if known."
+      },
+      "overage": {
+        "mode": "auto_topup",
+        "monthly_cap_usd": 50
+      },
+      "notes": "Burn up to included.allowance_usd = plan credits. Above that = metered cash, capped by overage.monthly_cap_usd."
+    }
+  ]
+}

@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tokut</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="chat-drawer-open">
+    <main class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div class="brand-text">
+            <h1>Tokut</h1>
+            <p id="subtitle" class="sub">Watching OpenAI, Anthropic, Google, and Grok local session logs</p>
+          </div>
+        </div>
+        <div class="topbar-meta">
+          <div class="meta-cell">
+            <span class="meta-label">Events</span>
+            <span id="event-count" class="meta-value">0</span>
+          </div>
+          <div class="meta-cell">
+            <span class="meta-label">Files</span>
+            <span id="watched-files" class="meta-value">0</span>
+          </div>
+          <div class="meta-cell">
+            <span class="meta-label">Plan</span>
+            <span id="plan-type" class="meta-value">local</span>
+          </div>
+          <div class="conn" role="status">
+            <span id="connection-dot" class="dot stale"></span>
+            <span id="connection-text">connecting</span>
+          </div>
+        </div>
+      </header>
+
+      <nav class="viewbar" aria-label="Dashboard views">
+        <button id="chat-drawer-toggle" class="button chat-drawer-button" type="button" aria-expanded="true" aria-controls="chat-drawer">Chats</button>
+        <div id="view-pills" class="view-pills">
+          <button class="view-pill active" type="button" data-view-target="view-overview">Overview</button>
+          <button class="view-pill" type="button" data-view-target="view-charts">Charts</button>
+          <button class="view-pill" type="button" data-view-target="view-costs">Costs</button>
+          <button class="view-pill" type="button" data-view-target="view-breakdown">Breakdown</button>
+          <button class="view-pill" type="button" data-view-target="view-sessions">Sessions</button>
+        </div>
+        <div id="active-filters" class="chips" aria-live="polite"></div>
+        <button id="drawer-toggle" class="button drawer-button" type="button" aria-expanded="false" aria-controls="control-drawer">Filters</button>
+      </nav>
+
+      <section class="panel token-table-panel" aria-label="Token supply by provider and model">
+        <header class="panel-head">
+          <h2>Provider / Model Totals</h2>
+          <span id="provider-model-note" class="panel-note">0 rows</span>
+        </header>
+        <div id="provider-model-table" class="token-table"></div>
+      </section>
+
+      <section id="view-overview" class="kpis view-section" aria-label="Burning now">
+        <article class="kpi">
+          <span class="kpi-label">Burn · last hour</span>
+          <strong id="kpi-burn" class="num">0</strong>
+          <small id="kpi-burn-sub">≈ 0 tok/min over 5m</small>
+        </article>
+        <article class="kpi cost-kpi">
+          <span class="kpi-label">API equiv · last hour</span>
+          <strong id="cost-hour" class="num">$0.00</strong>
+          <small id="cost-hour-sub">$0.00 / min over 5m</small>
+        </article>
+        <article class="kpi cost-kpi">
+          <span class="kpi-label">API equiv · current min</span>
+          <strong id="cost-minute" class="num">$0.00</strong>
+          <small id="cost-minute-sub">estimated from priced models</small>
+        </article>
+        <article class="kpi cost-kpi">
+          <span class="kpi-label">API equiv · seen</span>
+          <strong id="cost-total" class="num">$0.00</strong>
+          <small id="cost-total-sub">0 priced · 0 unpriced</small>
+        </article>
+        <article class="kpi">
+          <span class="kpi-label">Latest session total</span>
+          <strong id="current-total" class="num">0</strong>
+          <small id="current-thread">No thread yet</small>
+        </article>
+        <article class="kpi detail-kpi">
+          <span class="kpi-label">Last turn</span>
+          <strong id="last-total" class="num">0</strong>
+          <small id="last-breakdown">in 0 · out 0</small>
+        </article>
+        <article class="kpi">
+          <span class="kpi-label">Context window</span>
+          <strong id="context-window" class="num">0%</strong>
+          <small id="context-raw">0 / 0</small>
+          <div class="bar"><span id="context-bar"></span></div>
+        </article>
+        <article class="kpi">
+          <span class="kpi-label">Codex 5h limit</span>
+          <strong id="primary-limit" class="num">0%</strong>
+          <small id="primary-reset">reset unknown</small>
+          <div class="bar"><span id="primary-bar"></span></div>
+        </article>
+        <article class="kpi">
+          <span class="kpi-label">Codex 7d limit</span>
+          <strong id="secondary-limit" class="num">0%</strong>
+          <small id="secondary-reset">reset unknown</small>
+          <div class="bar"><span id="secondary-bar"></span></div>
+        </article>
+      </section>
+
+      <section class="assurance-grid secondary-section" aria-label="Billing assurance">
+        <article class="assurance-card estimate">
+          <span class="assurance-label">Meter (list / server $)</span>
+          <strong id="api-equivalent" class="num">$0.00</strong>
+          <small id="api-equivalent-sub">full observed burn value</small>
+        </article>
+        <article class="assurance-card plan-credits">
+          <span class="assurance-label">Plan credits (discounted)</span>
+          <strong id="plan-credits" class="num">$0.00</strong>
+          <small id="plan-credits-sub">included allowance cover</small>
+        </article>
+        <article class="assurance-card metered">
+          <span class="assurance-label">Metered above plan</span>
+          <strong id="metered-above" class="num">$0.00</strong>
+          <small id="metered-above-sub">cash-eligible overage burn</small>
+        </article>
+        <article class="assurance-card confirmed">
+          <span class="assurance-label">Cash exposure</span>
+          <strong id="confirmed-charge" class="num">$0.00</strong>
+          <small id="confirmed-charge-sub">API + capped overage</small>
+        </article>
+        <article class="assurance-card quota">
+          <span class="assurance-label">Unknown / unmapped</span>
+          <strong id="quota-burn" class="num">$0.00</strong>
+          <small id="quota-burn-sub">assign billing_mode in config</small>
+        </article>
+        <article class="assurance-card confidence">
+          <span class="assurance-label">Charge Confidence</span>
+          <strong id="charge-confidence">Unverified</strong>
+          <small id="charge-confidence-sub">local logs are not invoices</small>
+        </article>
+      </section>
+
+      <section class="panel secondary-section consult-panel" aria-label="Cost consultant briefing">
+        <header class="panel-head">
+          <h2>Consultant</h2>
+          <span class="panel-note">/api/consult</span>
+        </header>
+        <p id="consult-headline" class="consult-headline">No consult yet.</p>
+        <ul id="consult-actions" class="consult-actions"></ul>
+      </section>
+
+      <section class="panel secondary-section" aria-label="Subscriptions by company">
+        <header class="panel-head">
+          <h2>Subscriptions / Companies</h2>
+          <span id="subscription-count" class="panel-note">0 accounts</span>
+        </header>
+        <div id="subscriptions" class="subscription-rows"></div>
+      </section>
+
+      <section id="view-charts" class="chart-grid view-section" aria-label="Burn charts">
+        <article class="panel chart-panel full stock-panel" aria-label="Month to date spend chart">
+          <header class="panel-head stock-head">
+            <div>
+              <h2>MTD Spend Tape</h2>
+              <span id="mtd-spend-note" class="panel-note">actual and API equivalent</span>
+            </div>
+            <div id="mtd-spend-controls" class="stock-controls" aria-label="MTD spend zoom"></div>
+          </header>
+          <div id="mtd-spend-chart" class="stock-chart"></div>
+          <div class="stock-scrub">
+            <span id="mtd-spend-start">start</span>
+            <input id="mtd-spend-focus" type="range" min="0" max="100" value="100" aria-label="MTD spend chart focus" />
+            <span id="mtd-spend-end">now</span>
+          </div>
+        </article>
+
+        <article class="panel chart-panel" aria-label="Cash vs plan credits vs metered cost chart">
+          <header class="panel-head">
+            <h2>Cash · Metered · Plan Credits</h2>
+            <span id="cost-stack-note" class="panel-note">updated 0 seconds ago</span>
+          </header>
+          <div id="cost-stack-chart" class="cost-stack-chart"></div>
+        </article>
+
+        <article class="panel chart-panel" aria-label="Model API equivalent chart">
+          <header class="panel-head">
+            <h2>Model API Equivalent</h2>
+            <span id="model-chart-note" class="panel-note">top models</span>
+          </header>
+          <div id="model-chart" class="bar-chart"></div>
+        </article>
+
+        <article class="panel chart-panel wide" aria-label="Hourly API equivalent chart">
+          <header class="panel-head">
+            <h2>Hour Shape</h2>
+            <span id="hour-chart-note" class="panel-note">api equivalent by hour</span>
+          </header>
+          <div id="hour-chart" class="column-chart"></div>
+        </article>
+
+        <article class="panel chart-panel wide" aria-label="Recent minute token burn chart">
+          <header class="panel-head">
+            <h2>Recent Minute Burn</h2>
+            <span id="minute-chart-note" class="panel-note">tokens, newest right</span>
+          </header>
+          <div id="minute-chart" class="spark-chart"></div>
+        </article>
+      </section>
+
+      <section class="panel" aria-label="Rolling burn">
+        <header class="panel-head">
+          <h2>Rolling Burn</h2>
+          <span id="windows-note" class="panel-note">all events</span>
+        </header>
+        <div id="windows" class="windows"></div>
+      </section>
+
+      <section id="view-costs" class="cost-grid view-section" aria-label="Cost analytics">
+        <article class="panel" aria-label="Cost by model">
+          <header class="panel-head">
+            <h2>Model API Equivalent</h2>
+            <span id="model-count" class="panel-note">0 models</span>
+          </header>
+          <p id="billing-note" class="panel-hint">List-price equivalent; confirmed charges are unverified.</p>
+          <div id="models" class="model-rows"></div>
+        </article>
+
+        <article class="panel" aria-label="Cost by minute">
+          <header class="panel-head">
+            <h2>API Equiv / Minute</h2>
+            <span id="minute-count" class="panel-note">0 minutes</span>
+          </header>
+          <div id="minute-costs" class="minute-rows"></div>
+        </article>
+      </section>
+
+      <section id="view-breakdown" class="layout view-section">
+        <article class="panel area-breakdown" aria-label="Breakdown">
+          <header class="panel-head">
+            <h2>Breakdown</h2>
+            <div id="breakdown-tabs" class="tabs" role="tablist"></div>
+          </header>
+          <p class="panel-hint">Click a row to slice the whole dashboard by it.</p>
+          <div id="breakdowns" class="breakdowns"></div>
+        </article>
+
+        <div class="side">
+          <article class="panel" aria-label="Accounts">
+            <header class="panel-head">
+              <h2>Accounts</h2>
+              <span id="account-count" class="panel-note">0 accounts</span>
+            </header>
+            <div id="accounts" class="accounts"></div>
+          </article>
+
+          <article class="panel" aria-label="Codex limit windows">
+            <header class="panel-head">
+              <h2>Limit Windows</h2>
+              <span class="panel-note">codex rate limits</span>
+            </header>
+            <div id="limits" class="limit-rows"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-sessions" class="panel view-section" aria-label="Active sessions">
+        <header class="panel-head">
+          <h2>Active Sessions</h2>
+          <span id="session-count" class="panel-note">0 shown</span>
+        </header>
+        <div id="sessions" class="sessions"></div>
+      </section>
+    </main>
+    <aside id="chat-drawer" class="chat-drawer" aria-label="Live chats" aria-hidden="false">
+      <div class="chat-drawer-shell">
+        <header class="chat-drawer-head">
+          <div>
+            <span class="drawer-eyebrow">Tokut Rail</span>
+            <h2>Live Burn Ledger</h2>
+          </div>
+          <button id="chat-drawer-close" class="icon-button" type="button" aria-label="Close live chats">×</button>
+        </header>
+        <div class="chat-actions" aria-label="Live burn summary">
+          <button class="chat-action" type="button" data-chat-scope="hot">Burning now <span id="chat-burning-count">0</span></button>
+          <button class="chat-action" type="button" data-chat-scope="projects">Hot projects <span id="chat-project-count">0</span></button>
+          <button class="chat-action" type="button" data-chat-scope="quiet">Quiet recent <span id="chat-quiet-count">0</span></button>
+          <button class="chat-action" type="button" data-chat-scope="all">All watched <span id="chat-automation-count">0</span></button>
+        </div>
+        <div class="chat-drawer-scroll">
+          <section class="chat-section">
+            <h3>Burning Now</h3>
+            <div id="burning-chats" class="chat-list"></div>
+          </section>
+          <section class="chat-section">
+            <h3>Projects by 1h Burn</h3>
+            <div id="project-chats" class="project-chat-list"></div>
+          </section>
+          <section class="chat-section">
+            <h3>Recent Quiet</h3>
+            <div id="quiet-chats" class="chat-list"></div>
+          </section>
+        </div>
+        <footer class="chat-drawer-foot">
+          <span>Settings</span>
+          <span id="chat-drawer-count">0 chats</span>
+        </footer>
+      </div>
+    </aside>
+    <aside id="control-drawer" class="control-drawer" aria-label="Filters and sorts" aria-hidden="true">
+      <div class="drawer-shell">
+        <header class="drawer-head">
+          <div>
+            <span class="drawer-eyebrow">Controls</span>
+            <h2>Filters & Sorts</h2>
+          </div>
+          <button id="drawer-close" class="icon-button" type="button" aria-label="Close filters">×</button>
+        </header>
+        <div class="drawer-scroll">
+          <section class="drawer-section" aria-label="Sort order">
+            <h3>Sort</h3>
+            <div id="sorts" class="sort-options"></div>
+          </section>
+          <section class="drawer-section" aria-label="Filters">
+            <h3>Filters</h3>
+            <div id="filters" class="filters"></div>
+          </section>
+        </div>
+        <footer class="drawer-foot">
+          <button id="reset-filters" class="button" type="button">Reset all</button>
+          <button id="drawer-done" class="button primary" type="button">Done</button>
+        </footer>
+      </div>
+    </aside>
+    <script src="/app.js"></script>
+  </body>
+</html>

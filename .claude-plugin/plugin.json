@@ -1,0 +1,24 @@
+{
+  "name": "tokut",
+  "version": "0.1.0",
+  "description": "Watch live local AI token burn and API-equivalent cost across OpenAI, Anthropic, and Google logs.",
+  "author": {
+    "name": "Eidos AGI",
+    "email": "hello@eidosagi.com",
+    "url": "https://github.com/eidos-agi"
+  },
+  "homepage": "https://github.com/eidos-agi/tokut",
+  "repository": "https://github.com/eidos-agi/tokut",
+  "license": "MIT",
+  "category": "developer-tools",
+  "keywords": [
+    "tokens",
+    "ai-cost",
+    "codex",
+    "claude-code",
+    "gemini-cli",
+    "dashboard",
+    "eidos-agi"
+  ],
+  "skills": "./skills/"
+}

@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Local/private Tokut configuration. Commit the *.example.json templates only.
+tokut.config.json
+subscriptions.json
+pricing.json
+*.local.json
+.tokut/

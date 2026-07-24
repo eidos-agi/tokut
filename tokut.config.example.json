@@ -1,0 +1,18 @@
+{
+  "host": "127.0.0.1",
+  "port": 8766,
+  "codex_home": "~/.codex",
+  "roots": {
+    "codex": ["~/.codex"],
+    "claude": ["~/.claude"],
+    "gemini": ["~/.gemini"],
+    "grok": ["~/.grok"]
+  },
+  "subscriptions_file": "~/.config/tokut/subscriptions.json",
+  "pricing_file": "~/.config/tokut/pricing.json",
+  "local_user": "local-user",
+  "max_files": 500,
+  "max_events": 10000,
+  "initial_tail_mb": 8,
+  "poll_seconds": 1.0
+}

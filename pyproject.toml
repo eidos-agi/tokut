@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tokut"
+version = "0.2.0"
+description = "Read-only local AI cost consultant and token-burn dashboard for Codex, Claude, Gemini, and Grok."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Eidos AGI", email = "hello@eidosagi.com" }]
+keywords = ["tokens", "ai", "codex", "claude", "gemini", "grok", "costs", "dashboard", "billing"]
+
+[project.scripts]
+tokut = "tokut.server:main"
+
+[tool.setuptools.packages.find]
+include = ["tokut*"]
+
+[tool.setuptools.package-data]
+tokut = ["site/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
