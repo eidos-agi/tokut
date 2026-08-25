@@ -333,6 +333,29 @@ class TokenBurnStore:
             )
         if any(e.provider == "grok" for e in events):
             actions.append("Grok meter may use server costUsdTicks; reconcile cash on grok.com billing / Settings → Usage.")
+        live_pools = _live_pool_rows(self._subscriptions)
+        for pool in live_pools:
+            used = pool.get("percent_used")
+            resets = pool.get("resets_at") or "unknown reset"
+            label = f"{pool.get('subscription') or pool.get('provider')} weekly pool"
+            if used is not None:
+                actions.append(
+                    f"{label} observed {used:g}% used (resets {resets})"
+                    + ("; Extra Credits in use after the included week" if used >= 100 else "")
+                    + ". Human snapshot, not a live xAI scrape."
+                )
+            if pool.get("not_this_pool"):
+                actions.append(
+                    f"{label} does not include: " + "; ".join(pool["not_this_pool"][:2])
+                )
+        extra_credits = _extra_credit_rows(self._subscriptions)
+        for credit in extra_credits:
+            actions.append(
+                f"{credit.get('subscription') or credit.get('provider')} Extra Usage Credits "
+                f"${credit['balance_usd']:.2f}"
+                + (" currently in use" if credit.get("in_use") else "")
+                + f" (observed {credit.get('observed_at') or 'unknown'})."
+            )
         if not actions:
             actions.append("No urgent mapping gaps. Reconcile cash against provider invoices before treating estimates as spend.")
 
@@ -372,6 +395,8 @@ class TokenBurnStore:
                 "cash": billing.get("actual_charge_confidence") or "unverified",
                 "recorded_cash": "none_imported",
             },
+            "live_pools": live_pools,
+            "extra_credits": extra_credits,
             "domain_rules": ["DR-001", "DR-002", "DR-003", "DR-004", "DR-005", "DR-006", "DR-007"],
             "top_sessions": [
                 {
@@ -1365,6 +1390,13 @@ def _load_subscriptions(path: Path | None = None) -> dict[tuple[str, str], dict[
             "mode": overage_mode,
             "monthly_cap_usd": monthly_cap,
         }
+        for extra_key in ("topup_amount_usd", "trigger_below_usd"):
+            try:
+                extra_val = float(overage_raw.get(extra_key) or 0)
+            except (TypeError, ValueError):
+                extra_val = 0.0
+            if extra_val > 0:
+                overage[extra_key] = extra_val
         included_raw = account.get("included") if isinstance(account.get("included"), dict) else {}
         try:
             allowance_usd = float(included_raw.get("allowance_usd") or 0)
@@ -1390,8 +1422,95 @@ def _load_subscriptions(path: Path | None = None) -> dict[tuple[str, str], dict[
             "configured": True,
             "notes": str(account.get("notes") or ""),
         }
+        extra_credits = _observation_money(account.get("extra_credits"))
+        if extra_credits:
+            row["extra_credits"] = extra_credits
+        live_pool = _observation_live_pool(account.get("live_pool"))
+        if live_pool:
+            row["live_pool"] = live_pool
+        not_this_pool = account.get("not_this_pool")
+        if isinstance(not_this_pool, list):
+            row["not_this_pool"] = [str(item) for item in not_this_pool if str(item).strip()]
         out[(provider, account_name)] = row
     return out
+
+
+def _observation_money(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        balance = float(raw.get("balance_usd") or 0)
+    except (TypeError, ValueError):
+        return None
+    out: dict[str, Any] = {"balance_usd": round(balance, 8)}
+    if "in_use" in raw:
+        out["in_use"] = bool(raw.get("in_use"))
+    observed = str(raw.get("observed_at") or "").strip()
+    if observed:
+        out["observed_at"] = observed
+    return out
+
+
+def _observation_live_pool(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    try:
+        if raw.get("percent_used") is not None:
+            out["percent_used"] = float(raw.get("percent_used"))
+    except (TypeError, ValueError):
+        pass
+    for key in ("resets_at", "timezone", "observed_at", "source"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            out[key] = value
+    products = raw.get("products")
+    if isinstance(products, dict):
+        cleaned: dict[str, float] = {}
+        for name, pct in products.items():
+            try:
+                cleaned[str(name)] = float(pct)
+            except (TypeError, ValueError):
+                continue
+        if cleaned:
+            out["products"] = cleaned
+    return out or None
+
+
+def _live_pool_rows(subscriptions: dict[tuple[str, str], dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for (provider, account), sub in subscriptions.items():
+        pool = sub.get("live_pool")
+        if not isinstance(pool, dict) or not pool:
+            continue
+        row = {
+            "provider": provider,
+            "account": account,
+            "subscription": sub.get("subscription") or sub.get("plan"),
+            **pool,
+        }
+        not_this = sub.get("not_this_pool")
+        if isinstance(not_this, list) and not_this:
+            row["not_this_pool"] = not_this
+        rows.append(row)
+    return rows
+
+
+def _extra_credit_rows(subscriptions: dict[tuple[str, str], dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for (provider, account), sub in subscriptions.items():
+        credits = sub.get("extra_credits")
+        if not isinstance(credits, dict) or credits.get("balance_usd") is None:
+            continue
+        rows.append(
+            {
+                "provider": provider,
+                "account": account,
+                "subscription": sub.get("subscription") or sub.get("plan"),
+                **credits,
+            }
+        )
+    return rows
 
 
 def _provider_charge_confidence(provider: str, env_markers: list[str]) -> str:

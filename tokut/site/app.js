@@ -960,6 +960,15 @@ function subscriptionTooltip(row) {
     `Billing mode: ${row.billing_mode || "unknown"}`,
     `Included allowance: ${money(included.allowance_usd)} / ${included.period || "month"}`,
     `Overage: ${overage.mode || "none"} cap ${money(overage.monthly_cap_usd)}`,
+    overage.topup_amount_usd
+      ? `Auto top-up: ${money(overage.topup_amount_usd)} below ${money(overage.trigger_below_usd)}`
+      : "",
+    row.extra_credits
+      ? `Extra credits: ${money(row.extra_credits.balance_usd)}${row.extra_credits.in_use ? " in use" : ""}`
+      : "",
+    row.live_pool
+      ? `Live pool: ${row.live_pool.percent_used ?? "?"}% used · resets ${row.live_pool.resets_at || "unknown"}`
+      : "",
     `Meter: ${money(row.theoretical_api_equivalent_usd)}`,
     `Plan credits (discounted): ${money(row.plan_credits_usd)}`,
     `Metered above plan: ${money(row.metered_usd)}`,
@@ -967,7 +976,7 @@ function subscriptionTooltip(row) {
     `Events: ${fmt(row.event_count)}`,
     `Tokens: ${fmt(row.total_tokens)}`,
     row.configured ? "Configured in subscription file" : "Not configured; assign this account to a company",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 function modelTooltip(row) {

@@ -73,8 +73,8 @@ State **confidence**: logs alone → meter + policy; cash charges need billing p
 ## What Tokut Does Not Prove
 
 - Provider invoices or credit-card charges.
-- Live SuperGrok weekly pool entitlement percentage.
-- Exact overage dollars spent (cap is a ceiling, not a meter of top-ups).
+- Live SuperGrok weekly pool entitlement percentage from xAI (a human `live_pool` snapshot in `subscriptions.json` is an observation, not a scrape).
+- Exact overage dollars spent (cap is a ceiling, not a meter of top-ups). Extra Credits `balance_usd` is likewise an observed snapshot.
 
 For financial decisions, reconcile against provider billing exports or invoices.
 

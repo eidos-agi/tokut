@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 - 2026-08-25
+
+- Subscription rows may carry a human `live_pool` snapshot, Extra Credits balance, auto top-up trigger/amount, and `not_this_pool` notes. Consult surfaces them as observed facts, not a live xAI scrape.
+
 ## 0.2.0 - 2026-07-24
 
 - **AI cost consultant residue:** `DOMAIN_RULES.md`, `DECISIONS.md`, `PROCESS.md` — meter vs cash, overage caps, Grok stamps.

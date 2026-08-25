@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tokut.parser import TokenSnapshot, TokenUsage
-from tokut.store import TokenBurnStore
+from tokut.store import TokenBurnStore, _load_subscriptions
 
 
 def _event(ts: str, *, total: int, last: int, session_id: str) -> str:
@@ -581,6 +581,76 @@ def test_plan_credits_then_metered_overage(tmp_path: Path) -> None:
     assert billing["paid_api_or_overage_usd"] == 50.0
     assert billing["cash_exposure_max_usd"] == 50.0
     assert billing["included_allowance_usd"] == 200.0
+
+
+def test_load_subscriptions_keeps_live_pool_and_consults_it(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "subscriptions.json"
+    path.write_text(
+        json.dumps(
+            {
+                "accounts": [
+                    {
+                        "provider": "grok",
+                        "account": "default",
+                        "company": "Personal",
+                        "subscription": "SuperGrok Heavy",
+                        "plan": "SuperGrok Heavy",
+                        "billing_mode": "subscription",
+                        "included": {"period": "week", "allowance_usd": 200},
+                        "overage": {
+                            "mode": "auto_topup",
+                            "monthly_cap_usd": 50,
+                            "topup_amount_usd": 20,
+                            "trigger_below_usd": 10,
+                        },
+                        "extra_credits": {
+                            "balance_usd": 20,
+                            "in_use": True,
+                            "observed_at": "2026-08-25T15:19:00-05:00",
+                        },
+                        "live_pool": {
+                            "percent_used": 100,
+                            "resets_at": "2026-08-26T14:15:00-05:00",
+                            "timezone": "America/Chicago",
+                            "products": {"grok_build": 69, "chat": 5},
+                            "observed_at": "2026-08-25T15:19:00-05:00",
+                            "source": "screenshot",
+                        },
+                        "not_this_pool": ["Cursor IDE Grok — Cursor Models monthly pool."],
+                        "notes": "weekly 100%",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("TOKUT_SUBSCRIPTIONS_FILE", str(path))
+    loaded = _load_subscriptions()
+    row = loaded[("grok", "default")]
+    assert row["subscription"] == "SuperGrok Heavy"
+    assert row["overage"]["topup_amount_usd"] == 20.0
+    assert row["overage"]["trigger_below_usd"] == 10.0
+    assert row["extra_credits"]["balance_usd"] == 20.0
+    assert row["live_pool"]["percent_used"] == 100.0
+    assert row["live_pool"]["resets_at"] == "2026-08-26T14:15:00-05:00"
+    assert row["not_this_pool"][0].startswith("Cursor IDE Grok")
+
+    store = TokenBurnStore(
+        codex_home=tmp_path / ".codex",
+        codex_roots=[],
+        claude_roots=[],
+        gemini_roots=[],
+        grok_roots=[],
+        max_files=20,
+        subscriptions_file=path,
+    )
+    consult = store.consult(events=[], now=datetime(2026, 8, 25, 20, 0, tzinfo=timezone.utc))
+    assert consult["live_pools"][0]["percent_used"] == 100.0
+    assert consult["extra_credits"][0]["balance_usd"] == 20.0
+    joined = " ".join(consult["actions"])
+    assert "100% used" in joined
+    assert "Extra Usage Credits $20.00 currently in use" in joined
+    assert "Cursor IDE Grok" in joined
 
 
 def _snapshot(
