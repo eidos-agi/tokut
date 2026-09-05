@@ -279,8 +279,13 @@ def main() -> None:
         choices=["serve", "consult", "keys"],
         help="serve dashboard (default), print cost consult JSON, or manage local API keys",
     )
-    parser.add_argument("keys_action", nargs="?", default=None, help="keys list | put | delete | import-hermes")
-    parser.add_argument("keys_provider", nargs="?", default=None, help="provider id for keys put/delete")
+    parser.add_argument(
+        "keys_action",
+        nargs="?",
+        default=None,
+        help="keys list | put | delete | import-hermes | resolve | check",
+    )
+    parser.add_argument("keys_provider", nargs="?", default=None, help="provider id for keys put/delete/resolve/check")
     parser.add_argument("--config", type=Path, default=None, help="Path to a local Tokut JSON config file.")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
@@ -298,7 +303,12 @@ def main() -> None:
     parser.add_argument("--backend", default=None, help="keys put: inline (default) or knox")
     parser.add_argument("--ref", default=None, help="keys put: vault handle, e.g. knox:<id>")
     parser.add_argument("--env-file", type=Path, default=None, help="keys import-hermes: env file to copy from")
-    parser.add_argument("--tenant", default=None, help="kai tenant id for keys put/delete/import")
+    parser.add_argument("--tenant", default=None, help="kai tenant id for keys put/delete/import/resolve/check")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="keys resolve: exit non-zero if the slot is missing; never unwrap knox",
+    )
     parser.add_argument("--local-user", default=None)
     parser.add_argument("--max-files", type=int, default=None)
     parser.add_argument("--max-events", type=int, default=None)
@@ -404,7 +414,31 @@ def _run_keys_command(args: argparse.Namespace, runtime: dict) -> None:
         result = store.import_env_file(args.env_file, tenant=args.tenant)
         print(json.dumps({"ok": True, **result, "keys": store.list_public()}, indent=2))
         return
-    raise SystemExit("keys actions: list | put | delete | import-hermes")
+    if action in {"resolve", "check"}:
+        _run_keys_resolve(store, args, check=action == "check" or bool(getattr(args, "check", False)))
+        return
+    raise SystemExit("keys actions: list | put | delete | import-hermes | resolve | check")
+
+
+def _run_keys_resolve(store: KeyStore, args: argparse.Namespace, *, check: bool) -> None:
+    provider = (args.keys_provider or "").strip()
+    if not provider:
+        raise SystemExit("keys resolve needs a provider id")
+    report = store.public_resolve(provider, tenant=args.tenant)
+    print(_safe_keys_json(report))
+    missing = report.get("error") in {"not_found", "missing_secret", "missing_ref"}
+    if check:
+        if not store.slot_check_ok(report):
+            raise SystemExit(1)
+        return
+    if missing:
+        raise SystemExit(1)
+
+
+def _safe_keys_json(payload: dict) -> str:
+    """Serialize keys CLI output. Drop any secret field if a caller slipped."""
+    cleaned = {key: value for key, value in payload.items() if key != "secret"}
+    return json.dumps(cleaned, indent=2)
 
 
 def _secret_from_cli(args: argparse.Namespace, provider: str) -> str:

@@ -295,6 +295,55 @@ def test_knox_resolve_without_runner_returns_use_invoke_recipe(
     assert "secret" not in on_disk["keys"]["eidos/deepseek"]
 
 
+def test_public_resolve_inline_masks_secret(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.put(tenant="reeves", provider="openrouter", secret="sk-or-v1-supersecret9999")
+    library = store.resolve("openrouter", tenant="reeves")
+    assert library["secret"] == "sk-or-v1-supersecret9999"
+    report = store.public_resolve("openrouter", tenant="reeves")
+    dumped = json.dumps(report)
+    assert report["ok"] is True
+    assert report["usable"] is True
+    assert report["backend"] == "inline"
+    assert report["last4"] == "9999"
+    assert report["fp"] == fingerprint("sk-or-v1-supersecret9999")
+    assert report["present"] is True
+    assert report["length"] == len("sk-or-v1-supersecret9999")
+    assert "secret" not in report
+    assert "supersecret9999" not in dumped
+    assert store.slot_check_ok(report) is True
+
+
+def test_public_resolve_knox_is_use_invoke_even_with_runner(tmp_path: Path) -> None:
+    def runner(ref: str) -> str:
+        raise AssertionError(f"public_resolve must not unwrap {ref}")
+
+    store = KeyStore(
+        path=tmp_path / "keys.json",
+        hermes_env=tmp_path / "hermes.env",
+        tenants=_store(tmp_path).tenants,
+        hermes_tenant="reeves",
+        knox_runner=runner,
+    )
+    store.set_ref(tenant="eidos", provider="deepseek", ref="knox:bc3fdbe01f704a72")
+    report = store.public_resolve("deepseek", tenant="eidos")
+    dumped = json.dumps(report)
+    assert report["ok"] is False
+    assert report["usable"] is False
+    assert report["error"] == "use_invoke"
+    assert report["backend"] == "knox"
+    assert report["ref"] == "knox:…4a72"
+    assert report["env_var"] == "DEEPSEEK_API_KEY"
+    assert report["recipe"]
+    assert "secret" not in report
+    assert "bc3fdbe01f704a72" not in dumped
+    assert "knox get" not in dumped
+    assert store.slot_check_ok(report) is True
+    missing = store.public_resolve("nvidia", tenant="eidos")
+    assert missing["error"] == "not_found"
+    assert store.slot_check_ok(missing) is False
+
+
 def test_import_hermes_does_not_clobber_knox_ref(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("DEEPSEEK_API_KEY=sk-ds-imported8888\n", encoding="utf-8")

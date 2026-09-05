@@ -6,6 +6,8 @@
 - **`inline` backend:** today's plaintext slots. `resolve()` returns the stored secret. `put` + Hermes mirror for `reeves` unchanged.
 - **`knox` stub:** `put` / `set_ref` store `{backend: knox, ref}` with no secret. Public list shows backend + masked handle. Default `resolve()` is **not** unwrap: it returns `use_invoke` plus the Fort Knox recipe (`knox request` → `approve` → `invoke --env-var … -- <child>`). There is no `knox get` and no subprocess/stdout secret. `knox_runner` is a unit-test seam only. Never writes a secret back to `keys.json`.
 - **API:** GET includes `backend` and safe ref metadata. POST accepts legacy `{secret}` or `{backend, ref}`.
+- **CLI resolve / `--check` (D-10 step 5):** `tokut keys resolve <provider> --tenant …` prints JSON (`backend`, `usable`, `error`, masked handle, `env_var`, knox `recipe`/`hint`). Inline reports last4/fp only — never the secret, even though library `resolve()` still returns it. `resolve --check` and `keys check` exit non-zero on a missing slot. Knox succeeds when the ref is present and the invoke recipe is returned; no unwrap, no `knox get`.
+- **Keys UI backend + handle (D-10 step 6):** `/keys` picker for `knox` vs `inline` (legacy/migrate). Knox shows a handle/ref field and hides the secret box. POST `{tenant, provider, backend, ref}` for knox; `{secret}` for inline. List rows show `backend` and the masked handle.
 
 ## 0.3.1 - 2026-09-05
 
