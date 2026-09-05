@@ -34,6 +34,17 @@ http://127.0.0.1:8766
 http://127.0.0.1:8766/keys
 ```
 
+## Screenshots
+
+Burn dashboard (localhost):
+
+![Tokut burn dashboard](docs/screenshots/dashboard.png)
+
+Tenant-scoped keys page — last-four + fingerprint only, never the secret:
+
+![Tokut keys page](docs/screenshots/keys.png)
+
+
 Cost consultant briefing (JSON):
 
 ```bash
