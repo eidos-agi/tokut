@@ -40,6 +40,22 @@ Because: Read-only, testable, agent-consumable; skill/LLM is the face outside
 Risk: Advice quality limited to rules
 v2 might reverse this if: Local model is wired through eidos-inference with budgets
 
+## D-08: Kai tenants are Tokut tenants
+Date: 2026-09-05
+Chose: Key slots are `(tenant, provider)`. Tenant list is live `kai tenants` / `/tenants/api`. ADR 0001 five stores (eidos, aic, arp, gmw, reeves) only if the door is down. Hermes `.env` mirror is reeves only.
+Over: A single global key ring; inventing a sixth Tokut tenant; copying secrets across tenants
+Because: Daniel: "the tenants in kai will define the tenants in tokut"
+Risk: kai OAuth down → ADR fallback. Labeled as such. Still no sixth store.
+v2 might reverse this if: kai door is always reachable and cache is enough
+
+## D-07: Tokut is the local inference-key store
+Date: 2026-09-05
+Chose: Store API keys in `~/.config/tokut/keys.json` (0600), serve a localhost `/keys` page, return last-four only on GET, and mirror env vars into `~/.hermes/.env`
+Over: Leave keys only in Hermes `.env` / Knox; make Tokut stay strictly read-only
+Because: Daniel asked Tokut to hold OpenRouter and DeepSeek keys and wanted a simple page to add them. Cost burn and credential presence belong on the same local dashboard.
+Risk: A cost tool now writes secrets. Mitigate with localhost-only mutations, no secret in GET/logs, 0600 file, no CLI `--secret` argv.
+v2 might reverse this if: Knox becomes the only agent-facing vault and Tokut only indexes key *presence*
+
 ## D-06: Plan credits vs metered overage (discounted AI usage)
 Date: 2026-07-24
 Chose: `included.allowance_usd` + split meter into `plan_credits_usd` / `metered_usd` / cash

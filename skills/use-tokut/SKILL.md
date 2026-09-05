@@ -11,7 +11,9 @@ description: >
 
 Tokut is the **canonical local** dashboard and consult API for AI token burn and
 cost accounting across OpenAI Codex, Anthropic Claude Code, Google Gemini CLI,
-and **Grok Build**.
+and **Grok Build**. It is also the local store for inference API keys, **tenant-scoped by kai**.
+Tenants come from `kai tenants` / GET `/tenants/api` (eidos, aic, arp, gmw,
+reeves). Do not invent a sixth tenant. Do not copy secrets across tenants.
 
 ## Primary Rule
 
@@ -26,8 +28,10 @@ Useful commands:
 cd /path/to/tokut
 python run.py --port 8766          # dashboard
 python run.py consult              # one-shot JSON: meter / plan credits / metered / cash
+python run.py keys list            # masked local API keys
 tokut --port 8766
 tokut consult
+tokut keys list
 python -m pytest
 ```
 
@@ -35,7 +39,12 @@ Open the dashboard:
 
 ```text
 http://127.0.0.1:8766
+http://127.0.0.1:8766/keys
 ```
+
+Keys are `(tenant, provider)`. Agent instructions live at the bottom of `/keys`
+and on `GET /api/keys` as `agent_instructions`. Hermes `.env` is mirrored only
+for the laptop tenant `reeves`.
 
 Consult API (deterministic briefing — meter vs plan credits vs cash):
 
@@ -84,6 +93,7 @@ For financial decisions, reconcile against provider billing exports or invoices.
 ~/.config/tokut/config.json
 ~/.config/tokut/subscriptions.json
 ~/.config/tokut/pricing.json
+~/.config/tokut/keys.json
 ```
 
 Map Grok SuperGrok with overage cap:
@@ -104,6 +114,7 @@ Map Grok SuperGrok with overage cap:
 
 ## Safety Boundary
 
-Tokut is read-only. It tails local logs and serves a local dashboard.
-Do not add provider writes, billing mutations, account changes, or outbound
-notifications without an explicit approval-gated design.
+Cost ingest is read-only. The keys page is the local write path for inference
+API keys (`keys.json` mode 600, localhost mutations, GET is last-four only).
+Do not add provider writes, billing mutations, account changes, outbound
+notifications, or secret-returning APIs without an explicit approval-gated design.

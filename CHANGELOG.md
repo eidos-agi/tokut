@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1 - 2026-09-05
+
+- **Kai tenants own Tokut tenants.** Keys are `(tenant, provider)`. Tenant list is `kai tenants` / GET `/tenants/api`; ADR 0001 five-store list is fallback only if the door is down. No sixth tenant.
+- **Provenance:** source, source_path, created/rotated, sha256 fingerprint, vendor prefix, Hermes match/drift, history. GET still never returns the secret.
+- **Agent instructions** at the bottom of `/keys` and on `GET /api/keys` as `agent_instructions`.
+- Hermes `.env` mirror is only for the laptop tenant (`reeves`).
+
+## 0.3.0 - 2026-09-05
+
+- **Local inference keys:** Tokut stores API keys in `~/.config/tokut/keys.json` (mode 600). GET `/api/keys` returns last-four only.
+- **Keys page:** `http://127.0.0.1:8766/keys` — add/replace/remove OpenRouter, DeepSeek, and other inference keys. Writes stay on localhost.
+- Saving a key also upserts the matching env var in `~/.hermes/.env` so Hermes can use it. `tokut keys import-hermes` copies the other direction.
+- CLI: `tokut keys list|put|delete|import-hermes`. Put reads `--from-env` or `--secret-file`, never a secret argv.
+
 ## 0.2.1 - 2026-08-25
 
 - Subscription rows may carry a human `live_pool` snapshot, Extra Credits balance, auto top-up trigger/amount, and `not_this_pool` notes. Consult surfaces them as observed facts, not a live xAI scrape.

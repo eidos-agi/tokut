@@ -9,7 +9,8 @@ token burn across:
 - **Grok Build:** `~/.grok/sessions/**/updates.jsonl` (`turn_completed` usage)
 
 It does not call external services, read arbitrary files, or write into
-provider accounts or billing.
+provider accounts or billing. The one local write path is inference API keys
+on `http://127.0.0.1:8766/keys`.
 
 Domain law (meter vs cash, overage caps, server stamps): **`DOMAIN_RULES.md`**.
 
@@ -30,6 +31,7 @@ Then open:
 
 ```text
 http://127.0.0.1:8766
+http://127.0.0.1:8766/keys
 ```
 
 Cost consultant briefing (JSON):
@@ -66,7 +68,28 @@ By default Tokut looks for:
 ~/.config/tokut/config.json
 ~/.config/tokut/subscriptions.json
 ~/.config/tokut/pricing.json
+~/.config/tokut/keys.json
 ```
+
+## Keys
+
+Tokut stores inference API keys locally, **scoped by kai tenant**. Tenants are
+whatever `kai tenants` / GET `/tenants/api` returns (eidos, aic, arp, gmw,
+reeves). Tokut does not invent a sixth. The page is
+`http://127.0.0.1:8766/keys`. GET `/api/keys` returns last-four, fingerprint,
+source, and Hermes match/drift — never the secret. Saving a key for `reeves`
+also mirrors the env var into `~/.hermes/.env`. Other tenants stay in
+`keys.json` only.
+
+```bash
+python run.py keys list
+python run.py keys import-hermes
+python run.py keys put openrouter --from-env
+python run.py keys delete deepseek
+```
+
+Do not pass a secret on the command line. Use the page, `--from-env`, or
+`--secret-file`.
 
 or set:
 

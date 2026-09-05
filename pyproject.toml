@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokut"
-version = "0.2.0"
-description = "Read-only local AI cost consultant and token-burn dashboard for Codex, Claude, Gemini, and Grok."
+version = "0.3.1"
+description = "Local AI cost consultant, token-burn dashboard, and inference-key store for Codex, Claude, Gemini, Grok, and Hermes."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

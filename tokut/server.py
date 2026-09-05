@@ -3,13 +3,16 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
 from .config import config_path, config_path_list, load_config
+from .keys import DEFAULT_HERMES_ENV, DEFAULT_KEYS_FILE, KeyStore, PROVIDER_CATALOG
 from .store import TokenBurnStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,6 +21,7 @@ SITE_DIR = Path(__file__).resolve().parent / "site"
 
 class TokenBurnHandler(BaseHTTPRequestHandler):
     store: TokenBurnStore
+    keys: KeyStore
     poll_seconds: float
 
     def log_message(self, fmt: str, *args) -> None:
@@ -36,10 +40,89 @@ class TokenBurnHandler(BaseHTTPRequestHandler):
             self.store.refresh()
             self._json(self.store.consult(filters=_filters_from_query(parsed.query)))
             return
+        if parsed.path == "/api/keys":
+            tenant = (_filters_from_query(parsed.query).get("tenant") or [None])[0]
+            self._json(self.keys.payload(tenant))
+            return
+        if parsed.path == "/api/tenants":
+            self._json(self.keys.tenants.snapshot())
+            return
         if parsed.path == "/events":
             self._events(filters=_filters_from_query(parsed.query))
             return
+        if parsed.path in ("/keys", "/keys/"):
+            self._static("/keys.html")
+            return
         self._static(parsed.path)
+
+    def do_POST(self) -> None:
+        self._mutate("POST")
+
+    def do_PUT(self) -> None:
+        self._mutate("PUT")
+
+    def do_DELETE(self) -> None:
+        self._mutate("DELETE")
+
+    def _mutate(self, method: str) -> None:
+        if not _is_loopback(self.client_address[0]):
+            self._json({"ok": False, "error": "keys only accept localhost"}, status=403)
+            return
+        parsed = urlparse(self.path)
+        try:
+            body = self._read_json_body()
+        except ValueError as exc:
+            self._json({"ok": False, "error": str(exc)}, status=400)
+            return
+        if parsed.path in ("/api/keys", "/api/keys/") and method in {"POST", "PUT"}:
+            try:
+                public = self.keys.put(
+                    provider=str(body.get("provider") or ""),
+                    tenant=str(body.get("tenant") or ""),
+                    secret=body.get("secret"),
+                    label=body.get("label"),
+                    env_var=body.get("env_var"),
+                    source=str(body.get("source") or "keys-page"),
+                )
+            except ValueError as exc:
+                self._json({"ok": False, "error": str(exc)}, status=400)
+                return
+            self._json({"ok": True, "key": public})
+            return
+        if parsed.path == "/api/keys/import-hermes" and method == "POST":
+            result = self.keys.import_env_file()
+            self._json({"ok": True, **result, "keys": self.keys.list_public()})
+            return
+        if parsed.path.startswith("/api/keys/") and method == "DELETE":
+            rest = unquote(parsed.path[len("/api/keys/") :].strip("/"))
+            if "/" in rest:
+                tenant, provider = rest.split("/", 1)
+            else:
+                tenant = (_filters_from_query(parsed.query).get("tenant") or [""])[0]
+                provider = rest
+            if not self.keys.delete(provider, tenant=tenant):
+                self._json({"ok": False, "error": "key not found"}, status=404)
+                return
+            self._json({"ok": True, "deleted": f"{tenant}/{provider}", "keys": self.keys.list_public()})
+            return
+        self._json({"ok": False, "error": "not found"}, status=404)
+
+    def _read_json_body(self) -> dict:
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 65536:
+            raise ValueError("body too large")
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid JSON") from exc
+        if not isinstance(data, dict):
+            raise ValueError("JSON object required")
+        return data
 
     def _events(self, *, filters: dict[str, list[str]]) -> None:
         self.send_response(200)
@@ -109,6 +192,8 @@ def build_server(
     local_user: str | None = None,
     pricing_file: Path | None = None,
     subscriptions_file: Path | None = None,
+    keys_file: Path | None = None,
+    hermes_env: Path | None = None,
 ) -> ThreadingHTTPServer:
     store = TokenBurnStore(
         codex_home=codex_home,
@@ -129,8 +214,13 @@ def build_server(
         pass
 
     Handler.store = store
+    Handler.keys = KeyStore(path=keys_file or DEFAULT_KEYS_FILE, hermes_env=hermes_env)
     Handler.poll_seconds = poll_seconds
     return ThreadingHTTPServer((host, port), Handler)
+
+
+def _is_loopback(host: str) -> bool:
+    return host in {"127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"}
 
 
 def _filters_from_query(query: str) -> dict[str, list[str]]:
@@ -148,6 +238,8 @@ def _resolve_runtime(args: argparse.Namespace) -> dict:
     grok_roots = [path.expanduser() for path in args.grok_root] if args.grok_root else config_path_list(roots.get("grok"))
     pricing_file = args.pricing_file.expanduser() if args.pricing_file else config_path(config.get("pricing_file"))
     subscriptions_file = args.subscriptions_file.expanduser() if args.subscriptions_file else config_path(config.get("subscriptions_file"))
+    keys_file = args.keys_file.expanduser() if getattr(args, "keys_file", None) else config_path(config.get("keys_file")) or DEFAULT_KEYS_FILE
+    hermes_env = args.hermes_env.expanduser() if getattr(args, "hermes_env", None) else config_path(config.get("hermes_env")) or DEFAULT_HERMES_ENV
     local_user = args.local_user or config.get("local_user")
     max_files = args.max_files if args.max_files is not None else int(config.get("max_files") or 500)
     max_events = args.max_events if args.max_events is not None else int(config.get("max_events") or 10000)
@@ -165,6 +257,8 @@ def _resolve_runtime(args: argparse.Namespace) -> dict:
         "grok_roots": grok_roots,
         "pricing_file": pricing_file,
         "subscriptions_file": subscriptions_file,
+        "keys_file": keys_file,
+        "hermes_env": hermes_env,
         "local_user": str(local_user) if local_user else None,
         "max_files": max_files,
         "max_events": max_events,
@@ -179,9 +273,11 @@ def main() -> None:
         "command",
         nargs="?",
         default="serve",
-        choices=["serve", "consult"],
-        help="serve dashboard (default) or print one-shot cost consult JSON",
+        choices=["serve", "consult", "keys"],
+        help="serve dashboard (default), print cost consult JSON, or manage local API keys",
     )
+    parser.add_argument("keys_action", nargs="?", default=None, help="keys list | put | delete | import-hermes")
+    parser.add_argument("keys_provider", nargs="?", default=None, help="provider id for keys put/delete")
     parser.add_argument("--config", type=Path, default=None, help="Path to a local Tokut JSON config file.")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
@@ -192,6 +288,12 @@ def main() -> None:
     parser.add_argument("--grok-root", action="append", type=Path, default=None)
     parser.add_argument("--pricing-file", type=Path, default=None)
     parser.add_argument("--subscriptions-file", type=Path, default=None)
+    parser.add_argument("--keys-file", type=Path, default=None)
+    parser.add_argument("--hermes-env", type=Path, default=None)
+    parser.add_argument("--from-env", action="store_true", help="keys put: read secret from the process environment")
+    parser.add_argument("--secret-file", type=Path, default=None, help="keys put: read secret from a file (use - for stdin)")
+    parser.add_argument("--env-file", type=Path, default=None, help="keys import-hermes: env file to copy from")
+    parser.add_argument("--tenant", default=None, help="kai tenant id for keys put/delete/import")
     parser.add_argument("--local-user", default=None)
     parser.add_argument("--max-files", type=int, default=None)
     parser.add_argument("--max-events", type=int, default=None)
@@ -199,6 +301,10 @@ def main() -> None:
     parser.add_argument("--poll-seconds", type=float, default=None)
     args = parser.parse_args()
     runtime = _resolve_runtime(args)
+
+    if args.command == "keys":
+        _run_keys_command(args, runtime)
+        return
 
     if args.command == "consult":
         store = TokenBurnStore(
@@ -233,9 +339,12 @@ def main() -> None:
         local_user=runtime["local_user"],
         pricing_file=runtime["pricing_file"],
         subscriptions_file=runtime["subscriptions_file"],
+        keys_file=runtime["keys_file"],
+        hermes_env=runtime["hermes_env"],
     )
     url = f"http://{runtime['host']}:{runtime['port']}"
     print(f"Tokut dashboard: {url}")
+    print(f"Keys page:       {url}/keys")
     print(f"Consult API:     {url}/api/consult")
     print("Press Ctrl-C to stop.")
     try:
@@ -244,6 +353,54 @@ def main() -> None:
         pass
     finally:
         server.server_close()
+
+
+def _run_keys_command(args: argparse.Namespace, runtime: dict) -> None:
+    store = KeyStore(path=runtime["keys_file"], hermes_env=runtime["hermes_env"])
+    action = (args.keys_action or "list").strip().lower()
+    if action in {"list", "ls"}:
+        print(json.dumps(store.payload(), indent=2))
+        return
+    if action in {"put", "add", "set"}:
+        provider = (args.keys_provider or "").strip()
+        secret = _secret_from_cli(args, provider)
+        public = store.put(
+            provider=provider,
+            tenant=args.tenant or store.hermes_tenant,
+            secret=secret,
+            source="cli-from-env" if args.from_env else "cli-secret-file",
+        )
+        print(json.dumps({"ok": True, "key": public}, indent=2))
+        return
+    if action in {"delete", "rm", "remove"}:
+        provider = (args.keys_provider or "").strip()
+        tenant = args.tenant or store.hermes_tenant
+        if not store.delete(provider, tenant=tenant):
+            raise SystemExit(f"no key stored for {tenant}/{provider}")
+        print(json.dumps({"ok": True, "deleted": f"{tenant}/{provider}"}, indent=2))
+        return
+    if action in {"import-hermes", "import"}:
+        result = store.import_env_file(args.env_file, tenant=args.tenant)
+        print(json.dumps({"ok": True, **result, "keys": store.list_public()}, indent=2))
+        return
+    raise SystemExit("keys actions: list | put | delete | import-hermes")
+
+
+def _secret_from_cli(args: argparse.Namespace, provider: str) -> str:
+    if args.secret_file:
+        if str(args.secret_file) == "-":
+            return sys.stdin.read()
+        return Path(args.secret_file).expanduser().read_text(encoding="utf-8")
+    if args.from_env:
+        catalog = {row["id"]: row["env_var"] for row in PROVIDER_CATALOG}
+        env_var = catalog.get(provider.strip().lower())
+        if not env_var:
+            raise SystemExit("unknown provider; pass --secret-file instead of --from-env")
+        value = os.environ.get(env_var, "")
+        if not value.strip():
+            raise SystemExit(f"{env_var} is not set")
+        return value
+    raise SystemExit("keys put needs --from-env or --secret-file (do not pass the secret on the command line)")
 
 
 if __name__ == "__main__":

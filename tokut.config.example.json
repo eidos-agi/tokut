@@ -10,6 +10,8 @@
   },
   "subscriptions_file": "~/.config/tokut/subscriptions.json",
   "pricing_file": "~/.config/tokut/pricing.json",
+  "keys_file": "~/.config/tokut/keys.json",
+  "hermes_env": "~/.hermes/.env",
   "local_user": "local-user",
   "max_files": 500,
   "max_events": 10000,

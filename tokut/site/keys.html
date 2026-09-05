@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tokut Keys</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="keys-page">
+    <main class="app keys-app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div class="brand-text">
+            <h1>Tokut Keys</h1>
+            <p class="sub">Tenant-scoped inference keys. Tenants are kai’s. They stay on this Mac.</p>
+          </div>
+        </div>
+        <div class="topbar-meta">
+          <div class="meta-cell">
+            <span class="meta-label">Tenant</span>
+            <span id="tenant-source" class="meta-value">kai</span>
+          </div>
+          <div class="meta-cell">
+            <span class="meta-label">Stored</span>
+            <span id="key-count" class="meta-value">0</span>
+          </div>
+          <a class="button" href="/">Burn dashboard</a>
+        </div>
+      </header>
+
+      <nav class="tenant-pills" id="tenant-pills" aria-label="Kai tenants"></nav>
+
+      <section class="panel" aria-label="Add an API key">
+        <header class="panel-head">
+          <h2>Add a key</h2>
+          <span class="panel-note">last four + fingerprint after save</span>
+        </header>
+        <p class="panel-hint">Pick a kai tenant, then paste OpenRouter or DeepSeek. Tokut will not invent tenants. Hermes .env is only mirrored for <code>reeves</code>.</p>
+        <form id="key-form" class="key-form" autocomplete="off">
+          <label class="key-field">
+            <span>Tenant</span>
+            <select id="key-tenant" name="tenant" required></select>
+          </label>
+          <label class="key-field">
+            <span>Provider</span>
+            <select id="key-provider" name="provider" required></select>
+          </label>
+          <label class="key-field">
+            <span>Label</span>
+            <input id="key-label" name="label" type="text" placeholder="optional" />
+          </label>
+          <label class="key-field key-field-wide">
+            <span>API key</span>
+            <input id="key-secret" name="secret" type="password" required spellcheck="false" autocomplete="off" placeholder="paste, then save" />
+          </label>
+          <div class="key-actions">
+            <button class="button primary" type="submit">Save on this Mac</button>
+            <button class="button" id="import-hermes" type="button">Import Hermes .env → reeves</button>
+          </div>
+        </form>
+        <p id="key-status" class="key-status" role="status"></p>
+      </section>
+
+      <section class="panel" aria-label="Stored keys">
+        <header class="panel-head">
+          <h2>On this Mac</h2>
+          <span id="key-path" class="panel-note"></span>
+        </header>
+        <div id="key-list" class="key-list"></div>
+      </section>
+
+      <section class="panel agent-panel" aria-label="Instructions for agents">
+        <header class="panel-head">
+          <h2>For agents</h2>
+          <span class="panel-note">also on GET /api/keys as agent_instructions</span>
+        </header>
+        <pre id="agent-instructions" class="agent-instructions"></pre>
+      </section>
+    </main>
+    <script src="/keys.js"></script>
+  </body>
+</html>

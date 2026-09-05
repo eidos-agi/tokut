@@ -1,3 +1,3 @@
-"""Read-only Tokut watcher."""
+"""Local Tokut watcher, cost consultant, and inference-key store."""
 
-__version__ = "0.2.1"
+__version__ = "0.3.1"

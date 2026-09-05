@@ -19,3 +19,13 @@ the $563 path.
 
 Deliberately not in this pass: invoice import, scraping grok.com, SQLite
 multi-month store, multi-host merge, LLM-in-dashboard.
+
+## 2026-09-05 — Local keys page
+
+Hermes was still on NVIDIA Nemotron. Daniel had OpenRouter and DeepSeek keys
+and asked Tokut to store them, with a simple page to add keys if no frontend
+existed. The burn dashboard already existed; it had no credential surface.
+
+Added `~/.config/tokut/keys.json` (0600), `/keys`, localhost-only PUT/DELETE,
+masked GET, CLI `tokut keys`, and a Hermes `.env` mirror so the agent can
+actually use the key after save. Did not take secrets on the command line.
