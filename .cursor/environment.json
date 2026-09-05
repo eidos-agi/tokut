@@ -1,0 +1,17 @@
+{
+  "name": "Tokut",
+  "install": "python3 -m pip install -e . pytest",
+  "terminals": [
+    {
+      "name": "tokut-dashboard",
+      "command": "python3 run.py --port 8766",
+      "description": "Tokut local burn dashboard and keys page at http://127.0.0.1:8766 (reads local provider session logs; empty until logs exist)."
+    }
+  ],
+  "ports": [
+    {
+      "name": "tokut dashboard",
+      "port": 8766
+    }
+  ]
+}
