@@ -5,6 +5,7 @@ const SOURCE_LABEL = {
   "import-hermes": "copied from Hermes .env",
   "cli-from-env": "CLI --from-env",
   "cli-secret-file": "CLI --secret-file",
+  "cli-ref": "CLI vault ref",
   api: "HTTP API",
   "inferred-hermes-env": "matched Hermes .env (origin not recorded)",
   unknown: "origin not recorded",
