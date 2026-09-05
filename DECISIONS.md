@@ -40,7 +40,16 @@ Because: Read-only, testable, agent-consumable; skill/LLM is the face outside
 Risk: Advice quality limited to rules
 v2 might reverse this if: Local model is wired through eidos-inference with budgets
 
+## D-10: Keys adapter rollout — load contract first, then backends
+Date: 2026-09-05
+Chose: Today's `KeyStore._load` drops any record without a `secret` field, so ref-only slots would vanish until load/save accept `secret` OR `ref` (+ backend/inject); bump file version to 3 if needed. Call surface is small and in-repo only: KeyStore `put` / `get_secret` / `delete`, localhost POST/GET/DELETE `/api/keys`, CLI `keys put|list|delete|import-hermes`, Hermes `.env` mirror for `reeves` only. No Knox/Paseo callers in this repo. Rollout: (1) load/save accept ref|secret, (2) wrap today's plaintext as `inline` backend (tests stay green), (3) `knox` backend stub (store handle only; resolve via knox or report needs-unlock — never write secret), (4) API dual POST `{backend,ref}` or legacy `{secret}`, (5) CLI `resolve`/`--check` without printing secrets, (6) UI backend+handle (secret box = legacy/migrate), (7) migrate live DeepSeek slots to knox handle, (8) retire writing secrets once no inline slots remain, (9) unlock-broker / Paseo provider flip stay out of Tokut scope (Fort Knox / Paseo). First implementation PR: steps 1+2+3 with existing plaintext tests still green.
+Over: Jumping to UI/migrate before fixing load; treating Knox/Paseo inject as Tokut's job; one big-bang rewrite of keys.json
+Because: Confidence pass on live `tokut/keys.py` 2026-09-05; Daniel asked to increase confidence then record this in DECISIONS.md. Builds on D-09.
+Risk: Live keys.json inventory unknown until local inventory — migrate/retire timing stays ~60% confident; Hermes mirror may still hold plaintext after Tokut refs until step 8
+v2 might reverse this if: A single mandated vault makes intermediate `inline` unnecessary, or Paseo starts calling Tokut resolve directly (then inject policy might move into Tokut)
+
 ## D-09: Keys are vault adapters (refs), not a secret store
+Rollout detail: D-10.
 Date: 2026-09-05
 Chose: Store vault refs/handles + inject recipes per slot `(tenant, provider)`, not secrets as source of truth. Backends are pluggable: knox, env, file, keeper, and migrate-only `inline` (today's keys.json plaintext). Knox is one backend among many. Inject paths (env child-process, short-lived file-write then shred, optional Hermes mirror for reeves, `tokut keys resolve/--check`) are recipes on the slot; Tokut does not own Paseo plane inject policy (Paseo/wrapper does). Keep reading plaintext keys.json as `inline`; add ref+inject fields; move DeepSeek to knox:bc3fdbe01f704a72 when wiring; drop secrets from disk once every live slot has a non-inline ref.
 Over: Tokut as the local inference-key store (D-07); Knox special-cased forever; secrets in keys.json as source of truth
