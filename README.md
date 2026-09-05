@@ -100,8 +100,13 @@ python run.py keys list
 python run.py keys import-hermes
 python run.py keys put openrouter --from-env
 python run.py keys put deepseek --backend knox --ref knox:<handle>
+python run.py keys resolve deepseek --tenant eidos
+python run.py keys resolve deepseek --tenant eidos --check
+python run.py keys check deepseek --tenant eidos
 python run.py keys delete deepseek
 ```
+
+`keys resolve` / `keys check` never print a secret. Knox reports `use_invoke` plus the Fort Knox recipe (`request` → `approve` → `invoke`). `--check` exits non-zero if the slot is missing.
 
 Do not pass a secret on the command line. Use the page, `--from-env`, or
 `--secret-file`.

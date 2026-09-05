@@ -54,6 +54,17 @@ def test_keys_page_and_masked_crud(tmp_path: Path) -> None:
         assert "Tokut Keys" in html
         assert "Add a key" in html
         assert "For agents" in html
+        assert 'id="key-backend"' in html
+        assert "inline (legacy / migrate)" in html
+        assert 'id="key-ref"' in html
+        assert "API key (legacy / migrate)" in html
+
+        status, script = _request(server, "GET", "/keys.js")
+        assert status == 200
+        assert isinstance(script, str)
+        assert "body.ref = ref" in script
+        assert 'backend: "knox"' in script or "backend === \"knox\"" in script
+        assert "backend" in script and "ref" in script
 
         status, data = _request(
             server,

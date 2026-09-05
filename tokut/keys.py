@@ -207,6 +207,8 @@ Do not invent a sixth tenant. Do not copy secrets across tenants.
 - List: GET /api/keys  (optional ?tenant=eidos)
 - Add: POST /api/keys  {tenant, provider, secret, label?}  OR  {tenant, provider, backend, ref}
 - Delete: DELETE /api/keys/{tenant}/{provider}
+- CLI: `tokut keys resolve <provider> --tenant eidos` — JSON backend/usable/error/masked handle; never a secret
+- CLI check: `tokut keys resolve <provider> --check` or `tokut keys check <provider>` — exit 0 if the slot is present (knox: ref + recipe, no unwrap)
 - GET never returns the secret. Identity is tenant + provider + backend + masked handle/last4 (+ fingerprint for inline).
 - Backends: inline (migrate-only plaintext) and knox (handle only).
 - Knox resolve answers “can we use this slot / what’s the inject recipe”, not “give me the key”.
@@ -414,19 +416,98 @@ class KeyStore:
             "provider": pid,
         }
 
-    def _resolve_knox(
+    def public_resolve(self, provider: str, tenant: str | None = None) -> dict[str, Any]:
+        """CLI/agent view of a slot. Never includes a secret.
+
+        Inline: last4 / fingerprint / length only, even though ``resolve()``
+        returns the stored secret. Knox: Fort Knox ``use_invoke`` + recipe;
+        never calls ``knox_runner`` and never unwraps.
+        """
+        pid = _normalize_provider(provider)
+        tid = tenant or self.hermes_tenant
+        record = self._get_record(pid, tenant=tid)
+        if not record:
+            return {
+                "ok": False,
+                "usable": False,
+                "error": "not_found",
+                "tenant": tid,
+                "provider": pid,
+            }
+        backend = infer_backend(record)
+        env_var = str(record.get("env_var") or "").strip()
+        if backend == BACKEND_INLINE:
+            secret = str(record.get("secret") or "").strip()
+            if not secret:
+                payload = {
+                    "ok": False,
+                    "usable": False,
+                    "error": "missing_secret",
+                    "backend": backend,
+                    "tenant": tid,
+                    "provider": pid,
+                    "present": False,
+                }
+                if env_var:
+                    payload["env_var"] = env_var
+                return payload
+            masked = mask_secret(secret)
+            payload = {
+                "ok": True,
+                "usable": True,
+                "backend": backend,
+                "tenant": tid,
+                "provider": pid,
+                "last4": masked["last4"],
+                "fp": masked["fp"],
+                "length": masked["length"],
+                "present": masked["present"],
+                "prefix": masked["prefix"],
+            }
+            if env_var:
+                payload["env_var"] = env_var
+            return payload
+        if backend == BACKEND_KNOX:
+            return self._knox_invoke_report(record, tenant=tid, provider=pid)
+        payload = {
+            "ok": False,
+            "usable": False,
+            "error": "not_implemented_for_daemon",
+            "backend": backend,
+            "tenant": tid,
+            "provider": pid,
+        }
+        if env_var:
+            payload["env_var"] = env_var
+        return payload
+
+    def slot_check_ok(self, report: dict[str, Any]) -> bool:
+        """True when ``keys resolve --check`` / ``keys check`` should exit 0."""
+        if not isinstance(report, dict):
+            return False
+        error = report.get("error")
+        if error in {"not_found", "missing_secret", "missing_ref"}:
+            return False
+        backend = report.get("backend")
+        if backend == BACKEND_INLINE:
+            return bool(report.get("ok") and report.get("usable") and report.get("present"))
+        if backend == BACKEND_KNOX:
+            return bool(report.get("ref") and report.get("recipe") and error != "missing_ref")
+        return False
+
+    def _knox_invoke_report(
         self,
         record: dict[str, Any],
         *,
         tenant: str,
         provider: str,
-        allow_cli: bool,
     ) -> dict[str, Any]:
+        """Fort Knox-honest knox view: recipe only, never a secret."""
         ref = str(record.get("ref") or "").strip()
         handle = mask_ref_handle(ref)["display"]
         env_var = str(record.get("env_var") or "").strip()
         recipe = knox_inject_recipe(env_var)
-        base: dict[str, Any] = {
+        report: dict[str, Any] = {
             "ok": False,
             "usable": False,
             "backend": BACKEND_KNOX,
@@ -435,15 +516,29 @@ class KeyStore:
             "ref": handle,
             "hint": KNOX_RESOLVE_HINT if not env_var else KNOX_RESOLVE_HINT.replace("<ENV_VAR>", env_var),
             "recipe": recipe,
+            "error": "use_invoke" if ref else "missing_ref",
         }
         if env_var:
-            base["env_var"] = env_var
+            report["env_var"] = env_var
+        return report
+
+    def _resolve_knox(
+        self,
+        record: dict[str, Any],
+        *,
+        tenant: str,
+        provider: str,
+        allow_cli: bool,
+    ) -> dict[str, Any]:
+        base = self._knox_invoke_report(record, tenant=tenant, provider=provider)
+        ref = str(record.get("ref") or "").strip()
         if not ref:
-            return {**base, "error": "missing_ref"}
+            return base
         if self._knox_runner is None:
-            return {**base, "error": "use_invoke"}
+            return base
         if not allow_cli:
             return {**base, "error": "not_implemented_for_daemon"}
+        handle = base.get("ref")
         try:
             secret = self._knox_runner(ref)
         except KnoxNeedsUnlock as exc:

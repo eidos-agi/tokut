@@ -34,9 +34,9 @@
       <section class="panel" aria-label="Add an API key">
         <header class="panel-head">
           <h2>Add a key</h2>
-          <span class="panel-note">last four + fingerprint after save</span>
+          <span class="panel-note">knox handle or last-four after save — never the secret</span>
         </header>
-        <p class="panel-hint">Pick a kai tenant, then paste OpenRouter or DeepSeek. Tokut will not invent tenants. Hermes .env is only mirrored for <code>reeves</code>.</p>
+        <p class="panel-hint">Pick a kai tenant and a backend. <code>knox</code> stores a handle only. <code>inline</code> is legacy/migrate plaintext. Hermes .env is only mirrored for <code>reeves</code> inline puts. Tokut will not invent tenants.</p>
         <form id="key-form" class="key-form" autocomplete="off">
           <label class="key-field">
             <span>Tenant</span>
@@ -47,12 +47,23 @@
             <select id="key-provider" name="provider" required></select>
           </label>
           <label class="key-field">
+            <span>Backend</span>
+            <select id="key-backend" name="backend" required>
+              <option value="knox">knox</option>
+              <option value="inline">inline (legacy / migrate)</option>
+            </select>
+          </label>
+          <label class="key-field">
             <span>Label</span>
             <input id="key-label" name="label" type="text" placeholder="optional" />
           </label>
-          <label class="key-field key-field-wide">
-            <span>API key</span>
-            <input id="key-secret" name="secret" type="password" required spellcheck="false" autocomplete="off" placeholder="paste, then save" />
+          <label class="key-field key-field-wide" id="key-ref-field">
+            <span>Handle / ref</span>
+            <input id="key-ref" name="ref" type="text" spellcheck="false" autocomplete="off" placeholder="knox:&lt;handle&gt;" />
+          </label>
+          <label class="key-field key-field-wide is-legacy" id="key-secret-field" hidden>
+            <span>API key (legacy / migrate)</span>
+            <input id="key-secret" name="secret" type="password" spellcheck="false" autocomplete="off" placeholder="paste only if migrating plaintext" />
           </label>
           <div class="key-actions">
             <button class="button primary" type="submit">Save on this Mac</button>

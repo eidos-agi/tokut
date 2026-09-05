@@ -29,6 +29,8 @@ cd /path/to/tokut
 python run.py --port 8766          # dashboard
 python run.py consult              # one-shot JSON: meter / plan credits / metered / cash
 python run.py keys list            # masked local API keys
+python run.py keys resolve deepseek --tenant eidos
+python run.py keys check deepseek --tenant eidos
 tokut --port 8766
 tokut consult
 tokut keys list
@@ -47,7 +49,8 @@ instructions live at the bottom of `/keys` and on `GET /api/keys` as
 `agent_instructions`. Hermes `.env` is mirrored only for the laptop tenant
 `reeves` on inline puts. Never print secrets; knox slots store a handle only.
 Knox resolve is the inject recipe (`knox request` → `approve` → `invoke`),
-not a stdout unwrap. There is no `knox get`.
+not a stdout unwrap. There is no `knox get`. CLI `keys resolve` / `keys check`
+print backend, usable, error, and a masked handle only.
 
 Consult API (deterministic briefing — meter vs plan credits vs cash):
 
