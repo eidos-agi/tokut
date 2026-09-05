@@ -27,6 +27,7 @@ const state = {
   path: "",
   hermesTenant: "reeves",
   agentInstructions: "",
+  plannedPlanes: [],
 };
 
 function setStatus(text, kind) {
@@ -80,12 +81,61 @@ function fillProviders() {
   }
 }
 
+function syncBackendFields() {
+  const backend = $("key-backend").value;
+  const knox = backend === "knox";
+  $("key-ref-field").hidden = !knox;
+  $("key-secret-field").hidden = knox;
+  $("key-ref").required = knox;
+  $("key-secret").required = !knox;
+}
+
+function rowHandle(row) {
+  if (row.backend === "knox") {
+    return row.ref || `knox:…${row.last4 || ""}`;
+  }
+  return `${row.prefix || "key"}····${row.last4 || ""}`;
+}
+
+function slotMeta(row) {
+  const parts = [];
+  if (row.openrouter_project) parts.push(`project ${row.openrouter_project}`);
+  if (row.openrouter_tag) parts.push(`tag ${row.openrouter_tag}`);
+  if (row.spend_alias) parts.push(`spend_alias ${row.spend_alias}`);
+  const inject = row.inject && typeof row.inject === "object" ? row.inject : null;
+  if (inject) {
+    for (const [key, value] of Object.entries(inject)) {
+      parts.push(`${key} ${value}`);
+    }
+  }
+  return parts.join(" · ");
+}
+
+function renderPlanned() {
+  const node = $("planned-planes");
+  const rows = state.plannedPlanes || [];
+  if (!rows.length) {
+    node.hidden = true;
+    node.textContent = "";
+    return;
+  }
+  const text = rows
+    .map((row) => {
+      const alias = row.spend_alias ? `spend_alias ${row.spend_alias}` : "no spend alias yet";
+      return `${row.id} planned · ${alias}`;
+    })
+    .join(" · ");
+  node.hidden = false;
+  node.textContent = `Planned inject planes (not secret stores): ${text}`;
+}
+
 function renderList() {
   const root = $("key-list");
   const visible = state.keys.filter((row) => !state.tenant || row.tenant === state.tenant);
   $("key-count").textContent = String(visible.length);
   $("key-path").textContent = state.path || "";
   $("agent-instructions").textContent = state.agentInstructions || "";
+  renderPlanned();
   if (!visible.length) {
     root.innerHTML = `<p class="empty">No keys for ${escapeHtml(state.tenant || "this tenant")} yet.</p>`;
     return;
@@ -95,15 +145,19 @@ function renderList() {
     const item = document.createElement("article");
     item.className = "key-row key-row-provenanced";
     const hermes = row.hermes || {};
+    const backend = row.backend || "inline";
+    const identity = backend === "knox" ? rowHandle(row) : row.fp || "";
+    const meta = slotMeta(row);
     item.innerHTML = `
       <span class="provider-dot" aria-hidden="true"></span>
       <div class="key-main">
         <strong>${escapeHtml(row.label || row.provider)}</strong>
-        <small>${escapeHtml(row.tenant)} · ${escapeHtml(row.provider)} · ${escapeHtml(row.env_var || "")}</small>
-        <small class="key-provenance">${escapeHtml(SOURCE_LABEL[row.source] || row.source)} · ${escapeHtml(row.fp || "")}</small>
+        <small><span class="key-backend">${escapeHtml(backend)}</span> ${escapeHtml(row.tenant)} · ${escapeHtml(row.provider)} · ${escapeHtml(row.env_var || "")}</small>
+        <small class="key-provenance">${escapeHtml(SOURCE_LABEL[row.source] || row.source)}${identity ? ` · ${escapeHtml(identity)}` : ""}</small>
+        ${meta ? `<small class="key-provenance">${escapeHtml(meta)}</small>` : ""}
         <small class="key-provenance">${escapeHtml(HERMES_LABEL[hermes.status] || hermes.status || "")}${row.rotated_at ? ` · rotated ${escapeHtml(row.rotated_at)}` : ` · created ${escapeHtml(row.created_at || row.updated_at || "")}`}</small>
       </div>
-      <code class="key-mask">${escapeHtml(row.prefix || "key")}····${escapeHtml(row.last4 || "")}</code>
+      <code class="key-mask">${escapeHtml(rowHandle(row))}</code>
       <button class="button" type="button" data-delete-tenant="${escapeHtml(row.tenant)}" data-delete="${escapeHtml(row.provider)}">Remove</button>
     `;
     root.appendChild(item);
@@ -130,6 +184,7 @@ async function refresh() {
   state.path = data.path || "";
   state.hermesTenant = data.hermes_tenant || "reeves";
   state.agentInstructions = data.agent_instructions || "";
+  state.plannedPlanes = data.planned_inject_planes || [];
   fillTenants();
   fillProviders();
   renderList();
@@ -140,15 +195,27 @@ async function save(event) {
   const tenant = $("key-tenant").value;
   const provider = $("key-provider").value;
   const label = $("key-label").value.trim();
-  const secret = $("key-secret").value;
-  if (!secret.trim()) {
-    setStatus("Paste a key first.", "error");
-    return;
+  const backend = $("key-backend").value;
+  const body = { tenant, provider, label, backend, source: "keys-page" };
+  if (backend === "knox") {
+    const ref = $("key-ref").value.trim();
+    if (!ref) {
+      setStatus("Enter a knox handle / ref first.", "error");
+      return;
+    }
+    body.ref = ref;
+  } else {
+    const secret = $("key-secret").value;
+    if (!secret.trim()) {
+      setStatus("Paste a key first (inline is legacy / migrate).", "error");
+      return;
+    }
+    body.secret = secret;
   }
   const response = await fetch("/api/keys", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tenant, provider, label, secret, source: "keys-page" }),
+    body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.ok) {
@@ -156,9 +223,12 @@ async function save(event) {
     return;
   }
   $("key-secret").value = "";
+  $("key-ref").value = "";
   $("key-label").value = "";
   state.tenant = tenant;
-  setStatus(`Saved ${data.key.tenant}/${data.key.provider} ${data.key.fp}.`, "ok");
+  const saved = data.key || {};
+  const mark = saved.backend === "knox" ? saved.ref || saved.last4 : saved.fp;
+  setStatus(`Saved ${saved.tenant}/${saved.provider} ${saved.backend || backend} ${mark || ""}.`.trim(), "ok");
   await refresh();
 }
 
@@ -192,6 +262,8 @@ async function removeKey(tenant, provider) {
 }
 
 function boot() {
+  syncBackendFields();
+  $("key-backend").addEventListener("change", syncBackendFields);
   $("key-form").addEventListener("submit", (event) => {
     save(event).catch((error) => setStatus(String(error.message || error), "error"));
   });
