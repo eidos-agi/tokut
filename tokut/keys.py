@@ -7,7 +7,7 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .tenants import DEFAULT_HERMES_TENANT, UNSCOPED, TenantDirectory
 
@@ -33,6 +33,7 @@ _WRITE_SOURCES = {
     "import-hermes",
     "cli-from-env",
     "cli-secret-file",
+    "cli-ref",
     "api",
     "inferred-hermes-env",
     "unknown",
@@ -45,6 +46,13 @@ _VENDOR_PREFIXES = (
     "xai-",
     "sk-",
 )
+
+BACKEND_INLINE = "inline"
+BACKEND_KNOX = "knox"
+KNOWN_BACKENDS = frozenset({BACKEND_INLINE, BACKEND_KNOX, "env", "file", "keeper"})
+KEYS_FILE_V2 = 2
+KEYS_FILE_V3 = 3
+_KNOX_REF_RE = re.compile(r"^knox:[A-Za-z0-9._/-]{1,256}$")
 
 
 def keys_path(raw: str | Path | None = None) -> Path:
@@ -85,6 +93,83 @@ def vendor_prefix(secret: str) -> str:
     return ""
 
 
+class KnoxNeedsUnlock(Exception):
+    """Injected test knox_runner could not supply a fake secret."""
+
+
+KNOX_RESOLVE_HINT = (
+    "Tokut does not unwrap Knox and does not print a secret. "
+    "Use knox request → knox approve → knox invoke --record-id <record-id> "
+    "--grant-id <grant-id> --env-var <ENV_VAR> -- <child> "
+    "(add --stdio for long-lived ACP)."
+)
+
+
+def knox_inject_recipe(env_var: str | None = None) -> dict[str, Any]:
+    """Fort Knox inject recipe. Placeholders only — never fabricate grant ids."""
+    var = str(env_var or "").strip() or "<ENV_VAR>"
+    return {
+        "steps": ["knox request", "knox approve", "knox invoke"],
+        "invoke": (
+            f"knox invoke --record-id <record-id> --grant-id <grant-id> "
+            f"--env-var {var} -- <child>"
+        ),
+        "stdio": "add --stdio for long-lived ACP",
+        "materialize": "yaml materialize is Paseo interim only, not Tokut keys default",
+    }
+
+
+def slot_has_material(record: dict[str, Any]) -> bool:
+    secret = str(record.get("secret") or "").strip()
+    ref = str(record.get("ref") or "").strip()
+    return bool(secret or ref)
+
+
+def infer_backend(record: dict[str, Any]) -> str:
+    raw = str(record.get("backend") or "").strip().lower()
+    if raw:
+        return raw
+    ref = str(record.get("ref") or "").strip()
+    secret = str(record.get("secret") or "").strip()
+    if ref and not secret:
+        scheme = ref.split(":", 1)[0].lower() if ":" in ref else ""
+        if scheme in KNOWN_BACKENDS and scheme != BACKEND_INLINE:
+            return scheme
+        if ref.startswith("knox:"):
+            return BACKEND_KNOX
+        return BACKEND_KNOX
+    return BACKEND_INLINE
+
+
+def normalize_ref(ref: str, backend: str) -> str:
+    value = str(ref or "").strip()
+    if not value:
+        raise ValueError("ref is empty")
+    if backend == BACKEND_KNOX:
+        if ":" not in value:
+            value = f"knox:{value}"
+        if not _KNOX_REF_RE.match(value):
+            raise ValueError("knox ref must look like knox:<handle>")
+        return value
+    if ":" not in value:
+        value = f"{backend}:{value}"
+    return value
+
+
+def mask_ref_handle(ref: str) -> dict[str, str]:
+    value = str(ref or "").strip()
+    if not value:
+        return {"last4": "····", "display": "", "scheme": ""}
+    scheme, _, rest = value.partition(":")
+    if not rest:
+        rest = scheme
+        scheme = ""
+    tail = rest.rsplit("/", 1)[-1]
+    last4 = tail[-4:] if len(tail) >= 4 else (tail or "····")
+    display = f"{scheme}:…{last4}" if scheme else f"…{last4}"
+    return {"last4": last4, "display": display, "scheme": scheme}
+
+
 def display_path(path: str | Path | None) -> str | None:
     if not path:
         return None
@@ -117,13 +202,17 @@ def public_history(history: Any) -> list[dict[str, Any]]:
 
 
 AGENT_INSTRUCTIONS = """\
-Tokut keys are tenant-scoped. Tenants come from kai (`kai tenants` / GET /tenants/api).
+Tokut keys are tenant-scoped vault adapters. Tenants come from kai (`kai tenants` / GET /tenants/api).
 Do not invent a sixth tenant. Do not copy secrets across tenants.
 - List: GET /api/keys  (optional ?tenant=eidos)
-- Add: POST /api/keys  {tenant, provider, secret, label?}
+- Add: POST /api/keys  {tenant, provider, secret, label?}  OR  {tenant, provider, backend, ref}
 - Delete: DELETE /api/keys/{tenant}/{provider}
-- GET never returns the secret. Identity is tenant + provider + prefix + last4 + sha256 fingerprint.
-- Hermes .env is mirrored only for the laptop tenant (reeves). Other tenants stay in keys.json.
+- GET never returns the secret. Identity is tenant + provider + backend + masked handle/last4 (+ fingerprint for inline).
+- Backends: inline (migrate-only plaintext) and knox (handle only).
+- Knox resolve answers “can we use this slot / what’s the inject recipe”, not “give me the key”.
+- Default knox resolve is use_invoke: knox request → knox approve → knox invoke --env-var … -- <child> (add --stdio for ACP). No stdout unwrap.
+- knox_runner is a unit-test seam only. Production must not inject a stdout-print runner. Never write a secret into keys.json.
+- Hermes .env is mirrored only for the laptop tenant (reeves) on inline puts. Other tenants stay in keys.json.
 - Provenance: source, source_path, created_at, rotated_at, history, hermes match/drift.
 """
 
@@ -133,16 +222,37 @@ def slot_id(tenant: str, provider: str) -> str:
 
 
 def public_record(record: dict[str, Any], *, hermes_env: Path | None = None) -> dict[str, Any]:
+    backend = infer_backend(record)
     secret = str(record.get("secret") or "")
-    masked = mask_secret(secret)
+    ref = str(record.get("ref") or "")
     env_var = record.get("env_var")
     tenant = record.get("tenant") or UNSCOPED
-    return {
+    extra: dict[str, Any] = {}
+    if backend == BACKEND_INLINE:
+        masked = mask_secret(secret)
+        hermes = hermes_mirror_status(secret, env_var, hermes_env)
+    else:
+        handle = mask_ref_handle(ref)
+        masked = {
+            "last4": handle["last4"],
+            "length": 0,
+            "present": True,
+            "prefix": handle["scheme"] or backend,
+            "fp": None,
+        }
+        hermes = {
+            "status": "not-synced",
+            "env_var": str(env_var or "").strip(),
+            "path": display_path(hermes_env),
+        }
+        extra["ref"] = handle["display"]
+    payload = {
         "id": slot_id(str(tenant), str(record.get("provider") or "")),
         "tenant": tenant,
         "provider": record.get("provider"),
         "label": record.get("label") or record.get("provider"),
         "env_var": env_var,
+        "backend": backend,
         "created_at": record.get("created_at") or record.get("updated_at"),
         "updated_at": record.get("updated_at"),
         "rotated_at": record.get("rotated_at"),
@@ -150,9 +260,13 @@ def public_record(record: dict[str, Any], *, hermes_env: Path | None = None) -> 
         "source_path": display_path(record.get("source_path")),
         "last_event": record.get("last_event") or "stored",
         "history": public_history(record.get("history")),
-        "hermes": hermes_mirror_status(secret, env_var, hermes_env),
+        "hermes": hermes,
         **masked,
+        **extra,
     }
+    if record.get("inject") is not None:
+        payload["inject"] = record.get("inject")
+    return payload
 
 
 def hermes_mirror_status(secret: str, env_var: Any, hermes_env: Path | None) -> dict[str, Any]:
@@ -178,11 +292,15 @@ class KeyStore:
         *,
         tenants: TenantDirectory | None = None,
         hermes_tenant: str = DEFAULT_HERMES_TENANT,
+        knox_runner: Callable[[str], str] | None = None,
     ) -> None:
         self.path = keys_path(path)
         self.hermes_env = Path(hermes_env).expanduser() if hermes_env else DEFAULT_HERMES_ENV
         self.tenants = tenants or TenantDirectory()
         self.hermes_tenant = hermes_tenant
+        # Unit-test seam only. Production must not inject a stdout-get runner.
+        # Default knox resolve returns the Fort Knox invoke recipe, never a secret.
+        self._knox_runner = knox_runner
 
     def list_public(self, tenant: str | None = None) -> list[dict[str, Any]]:
         data = self._load()
@@ -207,14 +325,143 @@ class KeyStore:
         return rows
 
     def get_secret(self, provider: str, tenant: str | None = None) -> str | None:
+        record = self._get_record(provider, tenant=tenant)
+        if not record or infer_backend(record) != BACKEND_INLINE:
+            return None
+        secret = str(record.get("secret") or "").strip()
+        return secret or None
+
+    def _get_record(self, provider: str, tenant: str | None = None) -> dict[str, Any] | None:
         pid = _normalize_provider(provider)
         data = self._load()
         tid = tenant or self.hermes_tenant
         record = data["keys"].get(slot_id(tid, pid)) or data["keys"].get(pid)
+        return record if isinstance(record, dict) else None
+
+    def set_ref(
+        self,
+        *,
+        provider: str,
+        tenant: str,
+        ref: str,
+        backend: str = BACKEND_KNOX,
+        label: str | None = None,
+        env_var: str | None = None,
+        inject: Any | None = None,
+        source: str = "api",
+        source_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        return self.put(
+            provider=provider,
+            secret=None,
+            tenant=tenant,
+            label=label,
+            env_var=env_var,
+            sync_hermes=False,
+            source=source,
+            source_path=source_path,
+            backend=backend,
+            ref=ref,
+            inject=inject,
+        )
+
+    def resolve(
+        self,
+        provider: str,
+        tenant: str | None = None,
+        *,
+        allow_cli: bool = True,
+    ) -> dict[str, Any]:
+        """Resolve a slot.
+
+        Inline: returns the stored secret.
+        Knox: reports whether the slot is usable and the Fort Knox inject
+        recipe (request → approve → invoke). The default does not unwrap or
+        print a secret. ``knox_runner`` is a unit-test seam only.
+        """
+        pid = _normalize_provider(provider)
+        tid = tenant or self.hermes_tenant
+        record = self._get_record(pid, tenant=tid)
         if not record:
-            return None
-        secret = str(record.get("secret") or "").strip()
-        return secret or None
+            return {"ok": False, "error": "not_found", "tenant": tid, "provider": pid}
+        backend = infer_backend(record)
+        if backend == BACKEND_INLINE:
+            secret = str(record.get("secret") or "").strip()
+            if not secret:
+                return {
+                    "ok": False,
+                    "usable": False,
+                    "error": "missing_secret",
+                    "backend": backend,
+                    "tenant": tid,
+                    "provider": pid,
+                }
+            return {
+                "ok": True,
+                "usable": True,
+                "backend": backend,
+                "tenant": tid,
+                "provider": pid,
+                "secret": secret,
+            }
+        if backend == BACKEND_KNOX:
+            return self._resolve_knox(record, tenant=tid, provider=pid, allow_cli=allow_cli)
+        return {
+            "ok": False,
+            "error": "not_implemented_for_daemon",
+            "backend": backend,
+            "tenant": tid,
+            "provider": pid,
+        }
+
+    def _resolve_knox(
+        self,
+        record: dict[str, Any],
+        *,
+        tenant: str,
+        provider: str,
+        allow_cli: bool,
+    ) -> dict[str, Any]:
+        ref = str(record.get("ref") or "").strip()
+        handle = mask_ref_handle(ref)["display"]
+        env_var = str(record.get("env_var") or "").strip()
+        recipe = knox_inject_recipe(env_var)
+        base: dict[str, Any] = {
+            "ok": False,
+            "usable": False,
+            "backend": BACKEND_KNOX,
+            "tenant": tenant,
+            "provider": provider,
+            "ref": handle,
+            "hint": KNOX_RESOLVE_HINT if not env_var else KNOX_RESOLVE_HINT.replace("<ENV_VAR>", env_var),
+            "recipe": recipe,
+        }
+        if env_var:
+            base["env_var"] = env_var
+        if not ref:
+            return {**base, "error": "missing_ref"}
+        if self._knox_runner is None:
+            return {**base, "error": "use_invoke"}
+        if not allow_cli:
+            return {**base, "error": "not_implemented_for_daemon"}
+        try:
+            secret = self._knox_runner(ref)
+        except KnoxNeedsUnlock as exc:
+            return {**base, "error": "needs_unlock", "detail": str(exc)}
+        except Exception as exc:
+            return {**base, "error": "needs_unlock", "detail": str(exc)}
+        cleaned = str(secret or "").strip()
+        if not cleaned:
+            return {**base, "error": "needs_unlock", "detail": "injected knox_runner returned empty"}
+        return {
+            "ok": True,
+            "usable": True,
+            "backend": BACKEND_KNOX,
+            "tenant": tenant,
+            "provider": provider,
+            "ref": handle,
+            "secret": cleaned,
+        }
 
     def put(
         self,
@@ -227,6 +474,9 @@ class KeyStore:
         sync_hermes: bool | None = None,
         source: str = "api",
         source_path: str | Path | None = None,
+        backend: str | None = None,
+        ref: str | None = None,
+        inject: Any | None = None,
     ) -> dict[str, Any]:
         pid = _normalize_provider(provider)
         tid = self.tenants.require(tenant)
@@ -240,18 +490,76 @@ class KeyStore:
         if resolved_env and not _ENV_RE.match(resolved_env):
             raise ValueError("env_var must look like OPENROUTER_API_KEY")
 
-        cleaned_secret = (secret if secret is not None else existing.get("secret") or "").strip()
-        if not cleaned_secret:
-            raise ValueError("API key is empty")
+        incoming_secret = "" if secret is None else str(secret).strip()
+        incoming_ref = str(ref or "").strip()
+        requested = str(backend or "").strip().lower() or None
+        if requested is None:
+            if incoming_ref and not incoming_secret:
+                requested = infer_backend({"ref": incoming_ref})
+            else:
+                requested = BACKEND_INLINE
+        if requested not in KNOWN_BACKENDS:
+            raise ValueError(f"unknown backend {requested!r}")
 
         now = utc_now()
-        old_secret = str(existing.get("secret") or "").strip()
-        created = not old_secret
-        rotated = bool(old_secret) and old_secret != cleaned_secret
-        event = "created" if created else ("rotated" if rotated else "updated")
         origin = _normalize_source(source)
         origin_path = str(source_path) if source_path else existing.get("source_path")
         history = list(existing.get("history") or []) if isinstance(existing.get("history"), list) else []
+        resolved_inject = existing.get("inject") if inject is None else inject
+        label_value = (label or existing.get("label") or (known["label"] if known else pid)).strip()
+        env_value = resolved_env or f"{pid.upper().replace('-', '_')}_API_KEY"
+
+        if requested == BACKEND_INLINE:
+            cleaned_secret = incoming_secret or str(existing.get("secret") or "").strip()
+            if not cleaned_secret:
+                raise ValueError("API key is empty")
+            old_secret = str(existing.get("secret") or "").strip()
+            created = not old_secret
+            rotated = bool(old_secret) and old_secret != cleaned_secret
+            event = "created" if created else ("rotated" if rotated else "updated")
+            history.append(
+                {
+                    "at": now,
+                    "event": event,
+                    "source": origin,
+                    "source_path": origin_path,
+                    "tenant": tid,
+                    "fp": fingerprint(cleaned_secret),
+                    "last4": mask_secret(cleaned_secret)["last4"],
+                    "prefix": vendor_prefix(cleaned_secret),
+                }
+            )
+            record = {
+                "tenant": tid,
+                "provider": pid,
+                "label": label_value,
+                "env_var": env_value,
+                "backend": BACKEND_INLINE,
+                "secret": cleaned_secret,
+                "created_at": existing.get("created_at") or now,
+                "updated_at": now,
+                "rotated_at": now if rotated else existing.get("rotated_at"),
+                "source": origin if created or rotated or not existing.get("source") else existing.get("source"),
+                "source_path": origin_path,
+                "last_event": event,
+                "history": history[-_HISTORY_LIMIT:],
+            }
+            if resolved_inject is not None:
+                record["inject"] = resolved_inject
+            data["keys"][sid] = record
+            data["updated_at"] = now
+            self._save(data)
+            should_sync = self.hermes_tenant == tid if sync_hermes is None else sync_hermes
+            if should_sync:
+                upsert_env_var(self.hermes_env, record["env_var"], cleaned_secret)
+            return public_record(record, hermes_env=self.hermes_env)
+
+        cleaned_ref = normalize_ref(incoming_ref or str(existing.get("ref") or ""), requested)
+        old_ref = str(existing.get("ref") or "").strip()
+        existed = bool(existing)
+        rotated = existed and (infer_backend(existing) != requested or old_ref != cleaned_ref)
+        event = "created" if not existed else ("rotated" if rotated else "updated")
+        handle = mask_ref_handle(cleaned_ref)
         history.append(
             {
                 "at": now,
@@ -259,31 +567,31 @@ class KeyStore:
                 "source": origin,
                 "source_path": origin_path,
                 "tenant": tid,
-                "fp": fingerprint(cleaned_secret),
-                "last4": mask_secret(cleaned_secret)["last4"],
-                "prefix": vendor_prefix(cleaned_secret),
+                "fp": None,
+                "last4": handle["last4"],
+                "prefix": handle["scheme"] or requested,
             }
         )
         record = {
             "tenant": tid,
             "provider": pid,
-            "label": (label or existing.get("label") or (known["label"] if known else pid)).strip(),
-            "env_var": resolved_env or f"{pid.upper().replace('-', '_')}_API_KEY",
-            "secret": cleaned_secret,
+            "label": label_value,
+            "env_var": env_value,
+            "backend": requested,
+            "ref": cleaned_ref,
             "created_at": existing.get("created_at") or now,
             "updated_at": now,
             "rotated_at": now if rotated else existing.get("rotated_at"),
-            "source": origin if created or rotated or not existing.get("source") else existing.get("source"),
+            "source": origin if (not existed) or rotated or not existing.get("source") else existing.get("source"),
             "source_path": origin_path,
             "last_event": event,
             "history": history[-_HISTORY_LIMIT:],
         }
+        if resolved_inject is not None:
+            record["inject"] = resolved_inject
         data["keys"][sid] = record
         data["updated_at"] = now
         self._save(data)
-        should_sync = self.hermes_tenant == tid if sync_hermes is None else sync_hermes
-        if should_sync:
-            upsert_env_var(self.hermes_env, record["env_var"], cleaned_secret)
         return public_record(record, hermes_env=self.hermes_env)
 
     def delete(self, provider: str, tenant: str, *, sync_hermes: bool | None = None) -> bool:
@@ -315,6 +623,10 @@ class KeyStore:
         for name, value in parse_env_file(env_path).items():
             provider = _ENV_TO_PROVIDER.get(name)
             if not provider or not value.strip():
+                continue
+            existing = self._get_record(provider, tenant=tid)
+            if existing and infer_backend(existing) != BACKEND_INLINE:
+                skipped.append(provider)
                 continue
             if self.get_secret(provider, tenant=tid) == value.strip():
                 self._stamp_if_unknown(provider, tenant=tid, source="import-hermes", source_path=env_path)
@@ -373,7 +685,7 @@ class KeyStore:
             record["created_at"] = record.get("updated_at") or now
             record["last_event"] = record.get("last_event") or "stored"
             if not record.get("source"):
-                if env_var and env_values.get(env_var) == secret:
+                if infer_backend(record) == BACKEND_INLINE and env_var and env_values.get(env_var) == secret:
                     record["source"] = "inferred-hermes-env"
                     record["source_path"] = str(self.hermes_env)
                 else:
@@ -385,7 +697,7 @@ class KeyStore:
 
     def _load(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"version": 2, "updated_at": None, "keys": {}}
+            return {"version": KEYS_FILE_V2, "updated_at": None, "keys": {}}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
@@ -400,7 +712,7 @@ class KeyStore:
         elif isinstance(raw_keys, list):
             records = [(str(item.get("provider") or ""), item) for item in raw_keys if isinstance(item, dict)]
         for raw_id, record in records:
-            if not isinstance(record, dict) or not record.get("secret"):
+            if not isinstance(record, dict) or not slot_has_material(record):
                 continue
             provider = str(record.get("provider") or raw_id.split("/")[-1] or "").strip()
             tenant = str(record.get("tenant") or "").strip().lower()
@@ -412,12 +724,25 @@ class KeyStore:
             record = dict(record)
             record["tenant"] = tenant
             record["provider"] = provider
+            record["backend"] = infer_backend(record)
+            if record["backend"] != BACKEND_INLINE and not str(record.get("secret") or "").strip():
+                record.pop("secret", None)
             keys[slot_id(tenant, provider)] = record
-        return {"version": 2, "updated_at": data.get("updated_at"), "keys": keys}
+        version = _coerce_keys_version(data.get("version"))
+        if any(infer_backend(item) != BACKEND_INLINE or item.get("ref") for item in keys.values()):
+            version = max(version, KEYS_FILE_V3)
+        return {"version": version, "updated_at": data.get("updated_at"), "keys": keys}
 
     def _save(self, data: dict[str, Any]) -> None:
+        persist_keys = {
+            sid: _persist_record(record) for sid, record in (data.get("keys") or {}).items()
+        }
+        has_refs = any(
+            infer_backend(record) != BACKEND_INLINE or record.get("ref") for record in persist_keys.values()
+        )
+        version = KEYS_FILE_V3 if has_refs else KEYS_FILE_V2
         payload = json.dumps(
-            {"version": 2, "updated_at": data.get("updated_at"), "keys": data.get("keys") or {}},
+            {"version": version, "updated_at": data.get("updated_at"), "keys": persist_keys},
             indent=2,
             sort_keys=True,
         )
@@ -479,6 +804,39 @@ def remove_env_var(path: Path, name: str) -> None:
         kept.append(raw.rstrip("\n"))
     if changed:
         _atomic_write(path, ("\n".join(kept).rstrip() + "\n") if kept else "")
+
+
+def _coerce_keys_version(raw: Any) -> int:
+    try:
+        version = int(raw)
+    except (TypeError, ValueError):
+        return KEYS_FILE_V2
+    return version if version >= KEYS_FILE_V2 else KEYS_FILE_V2
+
+
+def _persist_record(record: dict[str, Any]) -> dict[str, Any]:
+    backend = infer_backend(record)
+    out: dict[str, Any] = {
+        "backend": backend,
+        "created_at": record.get("created_at"),
+        "env_var": record.get("env_var"),
+        "history": record.get("history"),
+        "label": record.get("label"),
+        "last_event": record.get("last_event"),
+        "provider": record.get("provider"),
+        "rotated_at": record.get("rotated_at"),
+        "source": record.get("source"),
+        "source_path": record.get("source_path"),
+        "tenant": record.get("tenant"),
+        "updated_at": record.get("updated_at"),
+    }
+    if record.get("inject") is not None:
+        out["inject"] = record.get("inject")
+    if backend == BACKEND_INLINE:
+        out["secret"] = record.get("secret")
+    else:
+        out["ref"] = record.get("ref")
+    return out
 
 
 def _normalize_provider(provider: str) -> str:

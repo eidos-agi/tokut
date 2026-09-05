@@ -84,3 +84,44 @@ def test_keys_page_and_masked_crud(tmp_path: Path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_keys_api_accepts_knox_ref_and_never_returns_secret(tmp_path: Path) -> None:
+    server = _server(tmp_path)
+    try:
+        status, data = _request(
+            server,
+            "POST",
+            "/api/keys",
+            {
+                "tenant": "eidos",
+                "provider": "deepseek",
+                "backend": "knox",
+                "ref": "knox:bc3fdbe01f704a72",
+                "source": "api",
+            },
+        )
+        assert status == 200
+        assert data["ok"] is True
+        assert data["key"]["backend"] == "knox"
+        assert data["key"]["ref"] == "knox:…4a72"
+        assert data["key"]["last4"] == "4a72"
+        assert "secret" not in data["key"]
+        assert "bc3fdbe01f704a72" not in json.dumps(data)
+
+        status, listed = _request(server, "GET", "/api/keys")
+        assert status == 200
+        assert listed["keys"][0]["backend"] == "knox"
+        dumped = json.dumps(listed)
+        assert "secret" not in listed["keys"][0]
+        assert all("secret" not in row for row in listed["keys"])
+        assert "bc3fdbe01f704a72" not in dumped
+
+        keys_file = tmp_path / "keys.json"
+        on_disk = json.loads(keys_file.read_text(encoding="utf-8"))
+        assert on_disk["version"] == 3
+        assert on_disk["keys"]["eidos/deepseek"]["ref"] == "knox:bc3fdbe01f704a72"
+        assert "secret" not in on_disk["keys"]["eidos/deepseek"]
+    finally:
+        server.shutdown()
+        server.server_close()

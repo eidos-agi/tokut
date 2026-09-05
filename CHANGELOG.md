@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Keys adapters (D-09 / D-10 steps 1–3):** `KeyStore` load/save accepts `secret` **or** `ref` so vault handles are not dropped. File version 3 when refs are present; v2 plaintext still loads as `inline`.
+- **`inline` backend:** today's plaintext slots. `resolve()` returns the stored secret. `put` + Hermes mirror for `reeves` unchanged.
+- **`knox` stub:** `put` / `set_ref` store `{backend: knox, ref}` with no secret. Public list shows backend + masked handle. Default `resolve()` is **not** unwrap: it returns `use_invoke` plus the Fort Knox recipe (`knox request` → `approve` → `invoke --env-var … -- <child>`). There is no `knox get` and no subprocess/stdout secret. `knox_runner` is a unit-test seam only. Never writes a secret back to `keys.json`.
+- **API:** GET includes `backend` and safe ref metadata. POST accepts legacy `{secret}` or `{backend, ref}`.
+
 ## 0.3.1 - 2026-09-05
 
 - **Kai tenants own Tokut tenants.** Keys are `(tenant, provider)`. Tenant list is `kai tenants` / GET `/tenants/api`; ADR 0001 five-store list is fallback only if the door is down. No sixth tenant.

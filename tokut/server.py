@@ -83,6 +83,9 @@ class TokenBurnHandler(BaseHTTPRequestHandler):
                     label=body.get("label"),
                     env_var=body.get("env_var"),
                     source=str(body.get("source") or "keys-page"),
+                    backend=body.get("backend"),
+                    ref=body.get("ref"),
+                    inject=body.get("inject"),
                 )
             except ValueError as exc:
                 self._json({"ok": False, "error": str(exc)}, status=400)
@@ -292,6 +295,8 @@ def main() -> None:
     parser.add_argument("--hermes-env", type=Path, default=None)
     parser.add_argument("--from-env", action="store_true", help="keys put: read secret from the process environment")
     parser.add_argument("--secret-file", type=Path, default=None, help="keys put: read secret from a file (use - for stdin)")
+    parser.add_argument("--backend", default=None, help="keys put: inline (default) or knox")
+    parser.add_argument("--ref", default=None, help="keys put: vault handle, e.g. knox:<id>")
     parser.add_argument("--env-file", type=Path, default=None, help="keys import-hermes: env file to copy from")
     parser.add_argument("--tenant", default=None, help="kai tenant id for keys put/delete/import")
     parser.add_argument("--local-user", default=None)
@@ -363,13 +368,29 @@ def _run_keys_command(args: argparse.Namespace, runtime: dict) -> None:
         return
     if action in {"put", "add", "set"}:
         provider = (args.keys_provider or "").strip()
-        secret = _secret_from_cli(args, provider)
-        public = store.put(
-            provider=provider,
-            tenant=args.tenant or store.hermes_tenant,
-            secret=secret,
-            source="cli-from-env" if args.from_env else "cli-secret-file",
-        )
+        backend = (getattr(args, "backend", None) or "").strip().lower() or None
+        ref = (getattr(args, "ref", None) or "").strip() or None
+        if ref or (backend and backend != "inline"):
+            if args.from_env or args.secret_file:
+                raise SystemExit("keys put --ref cannot be combined with --from-env or --secret-file")
+            if not ref:
+                raise SystemExit("keys put --backend knox needs --ref")
+            public = store.put(
+                provider=provider,
+                tenant=args.tenant or store.hermes_tenant,
+                secret=None,
+                backend=backend or "knox",
+                ref=ref,
+                source="cli-ref",
+            )
+        else:
+            secret = _secret_from_cli(args, provider)
+            public = store.put(
+                provider=provider,
+                tenant=args.tenant or store.hermes_tenant,
+                secret=secret,
+                source="cli-from-env" if args.from_env else "cli-secret-file",
+            )
         print(json.dumps({"ok": True, "key": public}, indent=2))
         return
     if action in {"delete", "rm", "remove"}:
