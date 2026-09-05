@@ -4,8 +4,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
-import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -96,7 +94,29 @@ def vendor_prefix(secret: str) -> str:
 
 
 class KnoxNeedsUnlock(Exception):
-    """Knox CLI missing, locked, or otherwise unable to unwrap a handle."""
+    """Injected test knox_runner could not supply a fake secret."""
+
+
+KNOX_RESOLVE_HINT = (
+    "Tokut does not unwrap Knox and does not print a secret. "
+    "Use knox request → knox approve → knox invoke --record-id <record-id> "
+    "--grant-id <grant-id> --env-var <ENV_VAR> -- <child> "
+    "(add --stdio for long-lived ACP)."
+)
+
+
+def knox_inject_recipe(env_var: str | None = None) -> dict[str, Any]:
+    """Fort Knox inject recipe. Placeholders only — never fabricate grant ids."""
+    var = str(env_var or "").strip() or "<ENV_VAR>"
+    return {
+        "steps": ["knox request", "knox approve", "knox invoke"],
+        "invoke": (
+            f"knox invoke --record-id <record-id> --grant-id <grant-id> "
+            f"--env-var {var} -- <child>"
+        ),
+        "stdio": "add --stdio for long-lived ACP",
+        "materialize": "yaml materialize is Paseo interim only, not Tokut keys default",
+    }
 
 
 def slot_has_material(record: dict[str, Any]) -> bool:
@@ -150,24 +170,6 @@ def mask_ref_handle(ref: str) -> dict[str, str]:
     return {"last4": last4, "display": display, "scheme": scheme}
 
 
-def default_knox_get(ref: str) -> str:
-    knox = shutil.which("knox")
-    if not knox:
-        raise KnoxNeedsUnlock("knox CLI not available")
-    result = subprocess.run(
-        [knox, "get", ref],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=12,
-    )
-    secret = (result.stdout or "").strip()
-    err = (result.stderr or result.stdout or "knox get failed").strip()
-    if result.returncode != 0 or not secret:
-        raise KnoxNeedsUnlock(err)
-    return secret
-
-
 def display_path(path: str | Path | None) -> str | None:
     if not path:
         return None
@@ -206,7 +208,10 @@ Do not invent a sixth tenant. Do not copy secrets across tenants.
 - Add: POST /api/keys  {tenant, provider, secret, label?}  OR  {tenant, provider, backend, ref}
 - Delete: DELETE /api/keys/{tenant}/{provider}
 - GET never returns the secret. Identity is tenant + provider + backend + masked handle/last4 (+ fingerprint for inline).
-- Backends: inline (migrate-only plaintext) and knox (handle only). Knox resolve never writes the secret into keys.json.
+- Backends: inline (migrate-only plaintext) and knox (handle only).
+- Knox resolve answers “can we use this slot / what’s the inject recipe”, not “give me the key”.
+- Default knox resolve is use_invoke: knox request → knox approve → knox invoke --env-var … -- <child> (add --stdio for ACP). No stdout unwrap.
+- knox_runner is a unit-test seam only. Production must not inject a stdout-print runner. Never write a secret into keys.json.
 - Hermes .env is mirrored only for the laptop tenant (reeves) on inline puts. Other tenants stay in keys.json.
 - Provenance: source, source_path, created_at, rotated_at, history, hermes match/drift.
 """
@@ -293,7 +298,9 @@ class KeyStore:
         self.hermes_env = Path(hermes_env).expanduser() if hermes_env else DEFAULT_HERMES_ENV
         self.tenants = tenants or TenantDirectory()
         self.hermes_tenant = hermes_tenant
-        self._knox_runner = knox_runner or default_knox_get
+        # Unit-test seam only. Production must not inject a stdout-get runner.
+        # Default knox resolve returns the Fort Knox invoke recipe, never a secret.
+        self._knox_runner = knox_runner
 
     def list_public(self, tenant: str | None = None) -> list[dict[str, Any]]:
         data = self._load()
@@ -365,6 +372,13 @@ class KeyStore:
         *,
         allow_cli: bool = True,
     ) -> dict[str, Any]:
+        """Resolve a slot.
+
+        Inline: returns the stored secret.
+        Knox: reports whether the slot is usable and the Fort Knox inject
+        recipe (request → approve → invoke). The default does not unwrap or
+        print a secret. ``knox_runner`` is a unit-test seam only.
+        """
         pid = _normalize_provider(provider)
         tid = tenant or self.hermes_tenant
         record = self._get_record(pid, tenant=tid)
@@ -374,8 +388,22 @@ class KeyStore:
         if backend == BACKEND_INLINE:
             secret = str(record.get("secret") or "").strip()
             if not secret:
-                return {"ok": False, "error": "missing_secret", "backend": backend, "tenant": tid, "provider": pid}
-            return {"ok": True, "backend": backend, "tenant": tid, "provider": pid, "secret": secret}
+                return {
+                    "ok": False,
+                    "usable": False,
+                    "error": "missing_secret",
+                    "backend": backend,
+                    "tenant": tid,
+                    "provider": pid,
+                }
+            return {
+                "ok": True,
+                "usable": True,
+                "backend": backend,
+                "tenant": tid,
+                "provider": pid,
+                "secret": secret,
+            }
         if backend == BACKEND_KNOX:
             return self._resolve_knox(record, tenant=tid, provider=pid, allow_cli=allow_cli)
         return {
@@ -396,15 +424,24 @@ class KeyStore:
     ) -> dict[str, Any]:
         ref = str(record.get("ref") or "").strip()
         handle = mask_ref_handle(ref)["display"]
+        env_var = str(record.get("env_var") or "").strip()
+        recipe = knox_inject_recipe(env_var)
         base: dict[str, Any] = {
             "ok": False,
+            "usable": False,
             "backend": BACKEND_KNOX,
             "tenant": tenant,
             "provider": provider,
             "ref": handle,
+            "hint": KNOX_RESOLVE_HINT if not env_var else KNOX_RESOLVE_HINT.replace("<ENV_VAR>", env_var),
+            "recipe": recipe,
         }
+        if env_var:
+            base["env_var"] = env_var
         if not ref:
             return {**base, "error": "missing_ref"}
+        if self._knox_runner is None:
+            return {**base, "error": "use_invoke"}
         if not allow_cli:
             return {**base, "error": "not_implemented_for_daemon"}
         try:
@@ -415,9 +452,10 @@ class KeyStore:
             return {**base, "error": "needs_unlock", "detail": str(exc)}
         cleaned = str(secret or "").strip()
         if not cleaned:
-            return {**base, "error": "needs_unlock", "detail": "knox returned an empty secret"}
+            return {**base, "error": "needs_unlock", "detail": "injected knox_runner returned empty"}
         return {
             "ok": True,
+            "usable": True,
             "backend": BACKEND_KNOX,
             "tenant": tenant,
             "provider": provider,

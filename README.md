@@ -90,6 +90,8 @@ reeves). Tokut does not invent a sixth. The page is
 `http://127.0.0.1:8766/keys`. Slots are vault adapters (`inline` plaintext or
 `knox` handle). GET `/api/keys` returns backend, last-four / masked handle,
 fingerprint (inline), source, and Hermes match/drift — never the secret.
+Knox `resolve()` reports slot usability and the Fort Knox inject recipe
+(`request` → `approve` → `invoke`); it does not unwrap or print a key.
 Saving an inline key for `reeves` also mirrors the env var into
 `~/.hermes/.env`. Other tenants stay in `keys.json` only.
 

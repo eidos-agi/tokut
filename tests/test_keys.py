@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import inspect
 import json
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from tokut.keys import KeyStore, KnoxNeedsUnlock, fingerprint, parse_env_file
+import tokut.keys as keys_mod
+from tokut.keys import KeyStore, fingerprint, parse_env_file
 from tokut.tenants import TenantDirectory, parse_kai_tenants
 
 
@@ -232,7 +235,7 @@ def test_set_ref_stores_knox_handle_without_secret(tmp_path: Path) -> None:
     assert store.hermes_env.exists() is False
 
 
-def test_knox_resolve_never_writes_secret_back(tmp_path: Path) -> None:
+def test_knox_resolve_injected_runner_never_writes_secret_back(tmp_path: Path) -> None:
     def runner(ref: str) -> str:
         assert ref == "knox:bc3fdbe01f704a72"
         return "sk-fake-knox-zzzz9999"
@@ -259,22 +262,35 @@ def test_knox_resolve_never_writes_secret_back(tmp_path: Path) -> None:
     assert "sk-fake-knox-zzzz9999" not in store.path.read_text(encoding="utf-8")
 
 
-def test_knox_resolve_without_cli_reports_needs_unlock(tmp_path: Path) -> None:
-    def runner(ref: str) -> str:
-        raise KnoxNeedsUnlock("knox CLI not available")
+def test_knox_resolve_without_runner_returns_use_invoke_recipe(
+    tmp_path: Path, monkeypatch: object
+) -> None:
+    def boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError(f"subprocess must not run: {args}")
 
-    store = KeyStore(
-        path=tmp_path / "keys.json",
-        hermes_env=tmp_path / "hermes.env",
-        tenants=_store(tmp_path).tenants,
-        hermes_tenant="reeves",
-        knox_runner=runner,
-    )
-    store.put(tenant="eidos", provider="deepseek", backend="knox", ref="knox:deadbeefcafebabe", secret=None)
+    monkeypatch.setattr(subprocess, "run", boom)
+    store = _store(tmp_path)
+    assert store._knox_runner is None
+    store.set_ref(tenant="eidos", provider="deepseek", ref="knox:bc3fdbe01f704a72")
     result = store.resolve("deepseek", tenant="eidos")
+    dumped = json.dumps(result)
     assert result["ok"] is False
-    assert result["error"] == "needs_unlock"
-    assert result["ref"] == "knox:…babe"
+    assert result["usable"] is False
+    assert result["error"] == "use_invoke"
+    assert "secret" not in result
+    assert result["ref"] == "knox:…4a72"
+    assert "knox request" in dumped
+    assert "knox approve" in dumped
+    assert "knox invoke" in dumped
+    assert "--env-var DEEPSEEK_API_KEY" in dumped
+    assert "<grant-id>" in dumped
+    assert "<record-id>" in dumped
+    assert "knox get" not in dumped
+    assert "bc3fdbe01f704a72" not in dumped
+    source = inspect.getsource(keys_mod)
+    assert "subprocess" not in source
+    assert "knox get" not in source
+    assert not hasattr(keys_mod, "default_knox_get")
     on_disk = json.loads(store.path.read_text(encoding="utf-8"))
     assert "secret" not in on_disk["keys"]["eidos/deepseek"]
 

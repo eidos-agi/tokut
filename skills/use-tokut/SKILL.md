@@ -46,6 +46,8 @@ Keys are `(tenant, provider)` vault adapters (`inline` or `knox`). Agent
 instructions live at the bottom of `/keys` and on `GET /api/keys` as
 `agent_instructions`. Hermes `.env` is mirrored only for the laptop tenant
 `reeves` on inline puts. Never print secrets; knox slots store a handle only.
+Knox resolve is the inject recipe (`knox request` → `approve` → `invoke`),
+not a stdout unwrap. There is no `knox get`.
 
 Consult API (deterministic briefing — meter vs plan credits vs cash):
 

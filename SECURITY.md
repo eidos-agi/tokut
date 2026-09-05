@@ -12,10 +12,15 @@ The keys page is the one local write path: inference API keys on this Mac.
 - Does not mutate provider accounts, billing, or subscriptions.
 - May write inference API keys or vault refs to `~/.config/tokut/keys.json`
   (mode 600). Inline (plaintext) puts for `reeves` still mirror env vars into
-  `~/.hermes/.env`. Knox slots store a handle only — resolve must not write the
-  secret back into `keys.json`. GET `/api/keys` never returns the secret, only
-  last-four / a masked handle plus `backend`. Key mutations are rejected unless
-  the client is loopback.
+  `~/.hermes/.env`. Knox slots store a handle only. Default knox `resolve()`
+  does not unwrap or print a secret — there is no `knox get` and no stdout
+  pull. The honest path is Fort Knox `knox request` → `knox approve` →
+  `knox invoke --env-var … -- <child>` (add `--stdio` for long-lived ACP).
+  Yaml materialize is Paseo interim, not Tokut's default. `knox_runner` is a
+  unit-test seam only; production must not inject a stdout-get runner.
+  Resolve must not write a secret back into `keys.json`. GET `/api/keys`
+  never returns the secret, only last-four / a masked handle plus `backend`.
+  Key mutations are rejected unless the client is loopback.
 
 ## Reporting
 
