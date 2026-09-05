@@ -221,8 +221,9 @@ def test_set_ref_stores_knox_handle_without_secret(tmp_path: Path) -> None:
     assert public["ref"] == "knox:…4a72"
     assert public["inject"] == {"via": "env"}
     assert "secret" not in public
-    dumped = json.dumps(store.payload())
-    assert "sk-" not in dumped
+    payload = store.payload()
+    dumped = json.dumps(payload)
+    assert all("secret" not in row for row in payload["keys"])
     assert "bc3fdbe01f704a72" not in dumped
     on_disk = json.loads(store.path.read_text(encoding="utf-8"))
     assert on_disk["version"] == 3

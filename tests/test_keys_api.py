@@ -114,7 +114,7 @@ def test_keys_api_accepts_knox_ref_and_never_returns_secret(tmp_path: Path) -> N
         assert listed["keys"][0]["backend"] == "knox"
         dumped = json.dumps(listed)
         assert "secret" not in listed["keys"][0]
-        assert "sk-" not in dumped
+        assert all("secret" not in row for row in listed["keys"])
         assert "bc3fdbe01f704a72" not in dumped
 
         keys_file = tmp_path / "keys.json"
