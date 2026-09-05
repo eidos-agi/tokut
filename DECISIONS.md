@@ -40,6 +40,14 @@ Because: Read-only, testable, agent-consumable; skill/LLM is the face outside
 Risk: Advice quality limited to rules
 v2 might reverse this if: Local model is wired through eidos-inference with budgets
 
+## D-09: Keys are vault adapters (refs), not a secret store
+Date: 2026-09-05
+Chose: Store vault refs/handles + inject recipes per slot `(tenant, provider)`, not secrets as source of truth. Backends are pluggable: knox, env, file, keeper, and migrate-only `inline` (today's keys.json plaintext). Knox is one backend among many. Inject paths (env child-process, short-lived file-write then shred, optional Hermes mirror for reeves, `tokut keys resolve/--check`) are recipes on the slot; Tokut does not own Paseo plane inject policy (Paseo/wrapper does). Keep reading plaintext keys.json as `inline`; add ref+inject fields; move DeepSeek to knox:bc3fdbe01f704a72 when wiring; drop secrets from disk once every live slot has a non-inline ref.
+Over: Tokut as the local inference-key store (D-07); Knox special-cased forever; secrets in keys.json as source of truth
+Because: Daniel: "tokut should have a keys adapter to any key system not just knox"; first-principles pause 2026-09-05. Supersedes D-07.
+Risk: Dropping `inline` before every live slot has a non-inline ref breaks callers; adapter bugs leave plaintext on disk
+v2 might reverse this if: A single vault is mandated and Tokut only indexes presence, or air-gap requires secrets back on disk
+
 ## D-08: Kai tenants are Tokut tenants
 Date: 2026-09-05
 Chose: Key slots are `(tenant, provider)`. Tenant list is live `kai tenants` / `/tenants/api`. ADR 0001 five stores (eidos, aic, arp, gmw, reeves) only if the door is down. Hermes `.env` mirror is reeves only.
@@ -49,6 +57,7 @@ Risk: kai OAuth down → ADR fallback. Labeled as such. Still no sixth store.
 v2 might reverse this if: kai door is always reachable and cache is enough
 
 ## D-07: Tokut is the local inference-key store
+Superseded by D-09 (2026-09-05).
 Date: 2026-09-05
 Chose: Store API keys in `~/.config/tokut/keys.json` (0600), serve a localhost `/keys` page, return last-four only on GET, and mirror env vars into `~/.hermes/.env`
 Over: Leave keys only in Hermes `.env` / Knox; make Tokut stay strictly read-only
