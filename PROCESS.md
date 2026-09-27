@@ -29,3 +29,13 @@ existed. The burn dashboard already existed; it had no credential surface.
 Added `~/.config/tokut/keys.json` (0600), `/keys`, localhost-only PUT/DELETE,
 masked GET, CLI `tokut keys`, and a Hermes `.env` mirror so the agent can
 actually use the key after save. Did not take secrets on the command line.
+
+## 2026-09-27 — Tenant AI-keys system of record
+
+Daniel wants Tokut to own refs and inject recipes for other agents, starting
+with DeepSeek on paseo-prims, plus per-tenant OpenRouter spend walls. D-08 still
+forbids a sixth secret store, and kai has not been shown to list `prims` or
+`ridge`. Recorded D-11: optional slot metadata on the existing KeyStore, planned
+planes instead of ADR entries, Prim Foundation `spend_alias` → `eidos`, SafePaste
+only as a re-stamped fallback. Did not migrate live keys, call Knox, flip the
+interim dsh yaml, or build unlock-broker.

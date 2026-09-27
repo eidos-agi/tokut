@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Tenant AI-keys SoR (D-11):** optional `openrouter_project`, `openrouter_tag`, `spend_alias`, and `inject` plane paths on key slots. Public list/API/CLI still never return a secret. `prims` (Prim Foundation, `spend_alias` `eidos`) and `ridge` (no alias yet) are planned inject planes until kai lists them, not new secret stores. Contract: `docs/tenant-ai-keys.md`.
 - **Keys adapters (D-09 / D-10 steps 1–3):** `KeyStore` load/save accepts `secret` **or** `ref` so vault handles are not dropped. File version 3 when refs are present; v2 plaintext still loads as `inline`.
 - **`inline` backend:** today's plaintext slots. `resolve()` returns the stored secret. `put` + Hermes mirror for `reeves` unchanged.
 - **`knox` stub:** `put` / `set_ref` store `{backend: knox, ref}` with no secret. Public list shows backend + masked handle. Default `resolve()` is **not** unwrap: it returns `use_invoke` plus the Fort Knox recipe (`knox request` → `approve` → `invoke --env-var … -- <child>`). There is no `knox get` and no subprocess/stdout secret. `knox_runner` is a unit-test seam only. Never writes a secret back to `keys.json`.

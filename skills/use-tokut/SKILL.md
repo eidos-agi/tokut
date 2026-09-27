@@ -14,6 +14,9 @@ cost accounting across OpenAI Codex, Anthropic Claude Code, Google Gemini CLI,
 and **Grok Build**. It is also the local store for inference API keys, **tenant-scoped by kai**.
 Tenants come from `kai tenants` / GET `/tenants/api` (eidos, aic, arp, gmw,
 reeves). Do not invent a sixth tenant. Do not copy secrets across tenants.
+DeepSeek is a direct Knox ref. OpenRouter project/tag/`spend_alias` is the spend
+wall. `prims` and `ridge` are planned inject planes until kai lists them
+(`docs/tenant-ai-keys.md`, D-11). Never print secrets or treat SafePaste as the store.
 
 ## Primary Rule
 

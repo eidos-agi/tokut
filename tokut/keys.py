@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from .key_meta import PLANNED_INJECT_PLANES, UNSET, safe_slot_meta, slot_metadata
 from .tenants import DEFAULT_HERMES_TENANT, UNSCOPED, TenantDirectory
 
 DEFAULT_KEYS_FILE = Path("~/.config/tokut/keys.json").expanduser()
@@ -214,6 +215,8 @@ Do not invent a sixth tenant. Do not copy secrets across tenants.
 - knox_runner is a unit-test seam only. Production must not inject a stdout-print runner. Never write a secret into keys.json.
 - Hermes .env is mirrored only for the laptop tenant (reeves) on inline puts. Other tenants stay in keys.json.
 - Provenance: source, source_path, created_at, rotated_at, history, hermes match/drift.
+- Optional SoR fields (never secrets): openrouter_project, openrouter_tag, spend_alias on openrouter slots; inject plane paths (dsh_credentials, paseo_prims). See docs/tenant-ai-keys.md.
+- prims and ridge are planned inject planes until kai lists them. Prim Foundation spend_alias is eidos. Do not open a secret store for them.
 """
 
 
@@ -264,8 +267,7 @@ def public_record(record: dict[str, Any], *, hermes_env: Path | None = None) -> 
         **masked,
         **extra,
     }
-    if record.get("inject") is not None:
-        payload["inject"] = record.get("inject")
+    payload.update(safe_slot_meta(record))
     return payload
 
 
@@ -350,6 +352,9 @@ class KeyStore:
         inject: Any | None = None,
         source: str = "api",
         source_path: str | Path | None = None,
+        openrouter_project: Any = UNSET,
+        openrouter_tag: Any = UNSET,
+        spend_alias: Any = UNSET,
     ) -> dict[str, Any]:
         return self.put(
             provider=provider,
@@ -363,6 +368,9 @@ class KeyStore:
             backend=backend,
             ref=ref,
             inject=inject,
+            openrouter_project=openrouter_project,
+            openrouter_tag=openrouter_tag,
+            spend_alias=spend_alias,
         )
 
     def resolve(
@@ -422,22 +430,7 @@ class KeyStore:
         provider: str,
         allow_cli: bool,
     ) -> dict[str, Any]:
-        ref = str(record.get("ref") or "").strip()
-        handle = mask_ref_handle(ref)["display"]
-        env_var = str(record.get("env_var") or "").strip()
-        recipe = knox_inject_recipe(env_var)
-        base: dict[str, Any] = {
-            "ok": False,
-            "usable": False,
-            "backend": BACKEND_KNOX,
-            "tenant": tenant,
-            "provider": provider,
-            "ref": handle,
-            "hint": KNOX_RESOLVE_HINT if not env_var else KNOX_RESOLVE_HINT.replace("<ENV_VAR>", env_var),
-            "recipe": recipe,
-        }
-        if env_var:
-            base["env_var"] = env_var
+        ref, handle, base = _knox_resolve_base(record, tenant=tenant, provider=provider)
         if not ref:
             return {**base, "error": "missing_ref"}
         if self._knox_runner is None:
@@ -453,15 +446,18 @@ class KeyStore:
         cleaned = str(secret or "").strip()
         if not cleaned:
             return {**base, "error": "needs_unlock", "detail": "injected knox_runner returned empty"}
-        return {
-            "ok": True,
-            "usable": True,
-            "backend": BACKEND_KNOX,
-            "tenant": tenant,
-            "provider": provider,
-            "ref": handle,
-            "secret": cleaned,
-        }
+        return _annotate_slot(
+            {
+                "ok": True,
+                "usable": True,
+                "backend": BACKEND_KNOX,
+                "tenant": tenant,
+                "provider": provider,
+                "ref": handle,
+                "secret": cleaned,
+            },
+            record,
+        )
 
     def put(
         self,
@@ -477,6 +473,9 @@ class KeyStore:
         backend: str | None = None,
         ref: str | None = None,
         inject: Any | None = None,
+        openrouter_project: Any = UNSET,
+        openrouter_tag: Any = UNSET,
+        spend_alias: Any = UNSET,
     ) -> dict[str, Any]:
         pid = _normalize_provider(provider)
         tid = self.tenants.require(tenant)
@@ -501,11 +500,20 @@ class KeyStore:
         if requested not in KNOWN_BACKENDS:
             raise ValueError(f"unknown backend {requested!r}")
 
+        meta = slot_metadata(
+            provider=pid,
+            tenant=tid,
+            existing=existing if isinstance(existing, dict) else {},
+            require_tenant=self.tenants.require,
+            openrouter_project=openrouter_project,
+            openrouter_tag=openrouter_tag,
+            spend_alias=spend_alias,
+            inject=UNSET if inject is None else inject,
+        )
         now = utc_now()
         origin = _normalize_source(source)
         origin_path = str(source_path) if source_path else existing.get("source_path")
         history = list(existing.get("history") or []) if isinstance(existing.get("history"), list) else []
-        resolved_inject = existing.get("inject") if inject is None else inject
         label_value = (label or existing.get("label") or (known["label"] if known else pid)).strip()
         env_value = resolved_env or f"{pid.upper().replace('-', '_')}_API_KEY"
 
@@ -544,8 +552,7 @@ class KeyStore:
                 "last_event": event,
                 "history": history[-_HISTORY_LIMIT:],
             }
-            if resolved_inject is not None:
-                record["inject"] = resolved_inject
+            _attach_slot_meta(record, meta)
             data["keys"][sid] = record
             data["updated_at"] = now
             self._save(data)
@@ -587,8 +594,7 @@ class KeyStore:
             "last_event": event,
             "history": history[-_HISTORY_LIMIT:],
         }
-        if resolved_inject is not None:
-            record["inject"] = resolved_inject
+        _attach_slot_meta(record, meta)
         data["keys"][sid] = record
         data["updated_at"] = now
         self._save(data)
@@ -654,6 +660,7 @@ class KeyStore:
             "hermes_tenant": self.hermes_tenant,
             "path": display_path(self.path),
             "hermes_env": display_path(self.hermes_env),
+            "planned_inject_planes": _planned_inject_planes(tenants),
             "agent_instructions": AGENT_INSTRUCTIONS.strip(),
         }
 
@@ -806,6 +813,44 @@ def remove_env_var(path: Path, name: str) -> None:
         _atomic_write(path, ("\n".join(kept).rstrip() + "\n") if kept else "")
 
 
+def _knox_resolve_base(record: dict[str, Any], *, tenant: str, provider: str) -> tuple[str, str, dict[str, Any]]:
+    ref = str(record.get("ref") or "").strip()
+    handle = mask_ref_handle(ref)["display"]
+    env_var = str(record.get("env_var") or "").strip()
+    hint = KNOX_RESOLVE_HINT if not env_var else KNOX_RESOLVE_HINT.replace("<ENV_VAR>", env_var)
+    base: dict[str, Any] = {
+        "ok": False,
+        "usable": False,
+        "backend": BACKEND_KNOX,
+        "tenant": tenant,
+        "provider": provider,
+        "ref": handle,
+        "hint": hint,
+        "recipe": knox_inject_recipe(env_var),
+    }
+    if env_var:
+        base["env_var"] = env_var
+    return ref, handle, _annotate_slot(base, record)
+
+
+def _attach_slot_meta(record: dict[str, Any], meta: dict[str, Any]) -> None:
+    for field in ("openrouter_project", "openrouter_tag", "spend_alias", "inject"):
+        record.pop(field, None)
+    record.update(meta)
+
+
+def _annotate_slot(payload: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    for key, value in safe_slot_meta(record).items():
+        if key not in payload:
+            payload[key] = value
+    return payload
+
+
+def _planned_inject_planes(tenants: dict[str, Any]) -> list[dict[str, Any]]:
+    live = {str(row.get("id") or "") for row in tenants.get("items") or [] if isinstance(row, dict)}
+    return [dict(row) for row in PLANNED_INJECT_PLANES if row["id"] not in live]
+
+
 def _coerce_keys_version(raw: Any) -> int:
     try:
         version = int(raw)
@@ -830,8 +875,7 @@ def _persist_record(record: dict[str, Any]) -> dict[str, Any]:
         "tenant": record.get("tenant"),
         "updated_at": record.get("updated_at"),
     }
-    if record.get("inject") is not None:
-        out["inject"] = record.get("inject")
+    out.update(safe_slot_meta(record))
     if backend == BACKEND_INLINE:
         out["secret"] = record.get("secret")
     else:

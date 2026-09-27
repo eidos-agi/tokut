@@ -9,6 +9,8 @@ from typing import Any
 
 # kai ADR 0001 — locked five stores. Not a sixth. Used only when the live
 # kai door cannot be read. Source of truth is still kai.
+# prims (Prim Foundation) and ridge are planned inject planes (D-11), not
+# fallback stores. They become slots only when kai lists them.
 KAI_ADR_TENANTS = (
     {"id": "eidos", "name": "eidos"},
     {"id": "aic", "name": "aic"},

@@ -86,10 +86,13 @@ By default Tokut looks for:
 
 Tokut stores inference API keys locally, **scoped by kai tenant**. Tenants are
 whatever `kai tenants` / GET `/tenants/api` returns (eidos, aic, arp, gmw,
-reeves). Tokut does not invent a sixth. The page is
+reeves). Tokut does not invent a sixth secret store. The durable model — DeepSeek
+direct Knox versus per-tenant OpenRouter spend walls, `spend_alias`, inject
+recipes, and the SafePaste fallback — is **`docs/tenant-ai-keys.md`** (D-11).
+`prims` and `ridge` are planned inject planes until kai lists them. The page is
 `http://127.0.0.1:8766/keys`. Slots are vault adapters (`inline` plaintext or
 `knox` handle). GET `/api/keys` returns backend, last-four / masked handle,
-fingerprint (inline), source, and Hermes match/drift — never the secret.
+fingerprint (inline), source, spend metadata, and Hermes match/drift — never the secret.
 Knox `resolve()` reports slot usability and the Fort Knox inject recipe
 (`request` → `approve` → `invoke`); it does not unwrap or print a key.
 Saving an inline key for `reeves` also mirrors the env var into
@@ -100,6 +103,8 @@ python run.py keys list
 python run.py keys import-hermes
 python run.py keys put openrouter --from-env
 python run.py keys put deepseek --backend knox --ref knox:<handle>
+python run.py keys put openrouter --tenant eidos --backend knox --ref knox:<handle> \
+  --openrouter-project '<project-id>' --openrouter-tag eidos
 python run.py keys delete deepseek
 ```
 
