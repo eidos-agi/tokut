@@ -200,6 +200,88 @@ def test_secret_shaped_metadata_is_rejected_and_redacted(tmp_path: Path) -> None
     assert "dsh_credentials" in raw
 
 
+def test_public_resolve_surfaces_metadata_without_secrets(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.set_ref(
+        tenant="eidos",
+        provider="openrouter",
+        ref=OPENROUTER_REF,
+        openrouter_project="eidos-mgmt",
+        openrouter_tag="eidos",
+        spend_alias="reeves",
+        inject=INJECT,
+    )
+    report = store.public_resolve("openrouter", tenant="eidos")
+    dumped = json.dumps(report)
+    assert report["error"] == "use_invoke"
+    assert report["openrouter_project"] == "eidos-mgmt"
+    assert report["openrouter_tag"] == "eidos"
+    assert report["spend_alias"] == "reeves"
+    assert report["inject"] == INJECT
+    assert report["ref"] == "knox:…ndle"
+    assert "secret" not in report
+    assert OPENROUTER_REF not in dumped
+    assert store.slot_check_ok(report) is True
+
+    inline = store.put(
+        tenant="reeves",
+        provider="openrouter",
+        secret="sk-or-v1-supersecret9999",
+        openrouter_project="reeves-mgmt",
+        openrouter_tag="reeves",
+    )
+    assert "secret" not in inline
+    public = store.public_resolve("openrouter", tenant="reeves")
+    assert public["ok"] is True
+    assert public["last4"] == "9999"
+    assert public["openrouter_project"] == "reeves-mgmt"
+    assert public["openrouter_tag"] == "reeves"
+    assert "secret" not in public
+    assert "supersecret9999" not in json.dumps(public)
+
+
+def test_cli_resolve_prints_metadata_not_the_ref_or_a_secret(tmp_path: Path) -> None:
+    keys = tmp_path / "keys.json"
+    hermes = tmp_path / "hermes.env"
+    _store(tmp_path).set_ref(
+        tenant="eidos",
+        provider="openrouter",
+        ref=OPENROUTER_REF,
+        openrouter_project="eidos-mgmt",
+        openrouter_tag="eidos",
+        spend_alias="reeves",
+        inject=INJECT,
+    )
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "run.py"),
+            "keys",
+            "resolve",
+            "openrouter",
+            "--tenant",
+            "eidos",
+            "--keys-file",
+            str(keys),
+            "--hermes-env",
+            str(hermes),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    report = json.loads(proc.stdout)
+    assert OPENROUTER_REF not in proc.stdout
+    assert report["openrouter_project"] == "eidos-mgmt"
+    assert report["spend_alias"] == "reeves"
+    assert report["inject"]["paseo_prims"] == "paseo-prims"
+    assert "secret" not in report
+    assert "sk-" not in proc.stdout
+
+
 def test_cli_put_prints_metadata_not_the_ref_or_a_secret(tmp_path: Path) -> None:
     keys = tmp_path / "keys.json"
     hermes = tmp_path / "hermes.env"
