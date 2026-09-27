@@ -21,6 +21,10 @@ The keys page is the one local write path: inference API keys on this Mac.
   Resolve must not write a secret back into `keys.json`. GET `/api/keys`
   never returns the secret, only last-four / a masked handle plus `backend`.
   Key mutations are rejected unless the client is loopback.
+- Slot metadata (`openrouter_project`, `openrouter_tag`, `spend_alias`, `inject`
+  plane paths) is not a secret store. Put rejects secret-shaped values. List,
+  API, and CLI omit them if a file was hand-edited. SafePaste is not a Tokut
+  store; see `docs/tenant-ai-keys.md`.
 
 ## Reporting
 

@@ -86,6 +86,7 @@ class TokenBurnHandler(BaseHTTPRequestHandler):
                     backend=body.get("backend"),
                     ref=body.get("ref"),
                     inject=body.get("inject"),
+                    **_slot_meta_from_body(body),
                 )
             except ValueError as exc:
                 self._json({"ok": False, "error": str(exc)}, status=400)
@@ -297,6 +298,10 @@ def main() -> None:
     parser.add_argument("--secret-file", type=Path, default=None, help="keys put: read secret from a file (use - for stdin)")
     parser.add_argument("--backend", default=None, help="keys put: inline (default) or knox")
     parser.add_argument("--ref", default=None, help="keys put: vault handle, e.g. knox:<id>")
+    parser.add_argument("--openrouter-project", default=None, help="keys put: OpenRouter project id (spend wall), not a secret")
+    parser.add_argument("--openrouter-tag", default=None, help="keys put: OpenRouter spend tag, not a secret")
+    parser.add_argument("--spend-alias", default=None, help="keys put: other kai tenant that owns this OpenRouter spend plane")
+    parser.add_argument("--inject", default=None, help="keys put: JSON object of plane path placeholders, no secrets")
     parser.add_argument("--env-file", type=Path, default=None, help="keys import-hermes: env file to copy from")
     parser.add_argument("--tenant", default=None, help="kai tenant id for keys put/delete/import")
     parser.add_argument("--local-user", default=None)
@@ -367,30 +372,7 @@ def _run_keys_command(args: argparse.Namespace, runtime: dict) -> None:
         print(json.dumps(store.payload(), indent=2))
         return
     if action in {"put", "add", "set"}:
-        provider = (args.keys_provider or "").strip()
-        backend = (getattr(args, "backend", None) or "").strip().lower() or None
-        ref = (getattr(args, "ref", None) or "").strip() or None
-        if ref or (backend and backend != "inline"):
-            if args.from_env or args.secret_file:
-                raise SystemExit("keys put --ref cannot be combined with --from-env or --secret-file")
-            if not ref:
-                raise SystemExit("keys put --backend knox needs --ref")
-            public = store.put(
-                provider=provider,
-                tenant=args.tenant or store.hermes_tenant,
-                secret=None,
-                backend=backend or "knox",
-                ref=ref,
-                source="cli-ref",
-            )
-        else:
-            secret = _secret_from_cli(args, provider)
-            public = store.put(
-                provider=provider,
-                tenant=args.tenant or store.hermes_tenant,
-                secret=secret,
-                source="cli-from-env" if args.from_env else "cli-secret-file",
-            )
+        public = _put_key_from_cli(store, args)
         print(json.dumps({"ok": True, "key": public}, indent=2))
         return
     if action in {"delete", "rm", "remove"}:
@@ -405,6 +387,64 @@ def _run_keys_command(args: argparse.Namespace, runtime: dict) -> None:
         print(json.dumps({"ok": True, **result, "keys": store.list_public()}, indent=2))
         return
     raise SystemExit("keys actions: list | put | delete | import-hermes")
+
+
+def _put_key_from_cli(store: KeyStore, args: argparse.Namespace) -> dict:
+    provider = (args.keys_provider or "").strip()
+    backend = (getattr(args, "backend", None) or "").strip().lower() or None
+    ref = (getattr(args, "ref", None) or "").strip() or None
+    meta = _slot_meta_from_cli(args)
+    tenant = args.tenant or store.hermes_tenant
+    try:
+        if ref or (backend and backend != "inline"):
+            if args.from_env or args.secret_file:
+                raise SystemExit("keys put --ref cannot be combined with --from-env or --secret-file")
+            if not ref:
+                raise SystemExit("keys put --backend knox needs --ref")
+            return store.put(
+                provider=provider,
+                tenant=tenant,
+                secret=None,
+                backend=backend or "knox",
+                ref=ref,
+                source="cli-ref",
+                **meta,
+            )
+        secret = _secret_from_cli(args, provider)
+        return store.put(
+            provider=provider,
+            tenant=tenant,
+            secret=secret,
+            source="cli-from-env" if args.from_env else "cli-secret-file",
+            **meta,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+
+def _slot_meta_from_body(body: dict) -> dict:
+    extra = {}
+    for name in ("openrouter_project", "openrouter_tag", "spend_alias"):
+        if name in body:
+            extra[name] = body.get(name)
+    return extra
+
+
+def _slot_meta_from_cli(args: argparse.Namespace) -> dict:
+    extra = {}
+    if args.openrouter_project is not None:
+        extra["openrouter_project"] = args.openrouter_project
+    if args.openrouter_tag is not None:
+        extra["openrouter_tag"] = args.openrouter_tag
+    if args.spend_alias is not None:
+        extra["spend_alias"] = args.spend_alias
+    if args.inject is not None:
+        try:
+            parsed = json.loads(args.inject)
+        except json.JSONDecodeError as exc:
+            raise SystemExit("keys put --inject must be a JSON object") from exc
+        extra["inject"] = parsed
+    return extra
 
 
 def _secret_from_cli(args: argparse.Namespace, provider: str) -> str:

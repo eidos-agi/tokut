@@ -125,3 +125,57 @@ def test_keys_api_accepts_knox_ref_and_never_returns_secret(tmp_path: Path) -> N
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_keys_api_round_trips_spend_metadata_without_secrets(tmp_path: Path) -> None:
+    server = _server(tmp_path)
+    try:
+        status, data = _request(
+            server,
+            "POST",
+            "/api/keys",
+            {
+                "tenant": "eidos",
+                "provider": "openrouter",
+                "backend": "knox",
+                "ref": "knox:eidos-or-handle",
+                "openrouter_project": "eidos-mgmt",
+                "openrouter_tag": "eidos",
+                "spend_alias": "reeves",
+                "inject": {
+                    "dsh_credentials": "~/.dsh/.credentials.yaml",
+                    "paseo_prims": "paseo-prims",
+                },
+                "source": "api",
+            },
+        )
+        assert status == 200
+        assert data["key"]["spend_alias"] == "reeves"
+        assert data["key"]["openrouter_project"] == "eidos-mgmt"
+        assert "secret" not in data["key"]
+        assert "eidos-or-handle" not in json.dumps(data)
+
+        status, listed = _request(server, "GET", "/api/keys")
+        assert status == 200
+        body = json.dumps(listed)
+        assert listed["keys"][0]["inject"]["paseo_prims"] == "paseo-prims"
+        assert "eidos-or-handle" not in body
+        assert any(row["id"] == "prims" and row["spend_alias"] == "eidos" for row in listed["planned_inject_planes"])
+
+        status, rejected = _request(
+            server,
+            "POST",
+            "/api/keys",
+            {
+                "tenant": "eidos",
+                "provider": "deepseek",
+                "backend": "knox",
+                "ref": "knox:bc3fdbe01f704a72",
+                "openrouter_project": "nope",
+            },
+        )
+        assert status == 400
+        assert "secret" not in json.dumps(rejected)
+    finally:
+        server.shutdown()
+        server.server_close()
