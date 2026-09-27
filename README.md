@@ -53,6 +53,12 @@ python run.py consult
 curl -s http://127.0.0.1:8766/api/consult | python -m json.tool
 ```
 
+The briefing also includes `key_routes`: which tenant/provider slots exist, each
+backend (`knox` or `inline`), presence flags for `openrouter_project`,
+`openrouter_tag`, `spend_alias`, and `inject`, the safe public project/tag/alias
+values, and Hermes match/drift. It is read-only and never contains a secret or a
+full vault handle.
+
 ## What It Shows
 
 - Current thread total tokens and last-turn burn
@@ -111,7 +117,7 @@ python run.py keys check deepseek --tenant eidos
 python run.py keys delete deepseek
 ```
 
-`keys resolve` / `keys check` never print a secret. Knox reports `use_invoke` plus the Fort Knox recipe (`request` → `approve` → `invoke`) and any SoR metadata on the slot (`openrouter_project`, `openrouter_tag`, `spend_alias`, `inject`). `--check` exits non-zero if the slot is missing.
+`keys resolve` / `keys check` never print a secret. Knox reports `use_invoke` plus the Fort Knox recipe (`request` → `approve` → `invoke`) and any SoR metadata on the slot (`openrouter_project`, `openrouter_tag`, `spend_alias`, `inject`). `--check` exits non-zero if the slot is missing. `GET /api/consult` and `tokut consult` surface the same slots as `key_routes` (backend + metadata presence flags) so the cost story can name the routes without a secret.
 
 Do not pass a secret on the command line. Use the page, `--from-env`, or
 `--secret-file`.

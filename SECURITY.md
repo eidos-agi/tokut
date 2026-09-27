@@ -23,8 +23,10 @@ The keys page is the one local write path: inference API keys on this Mac.
   Key mutations are rejected unless the client is loopback.
 - Slot metadata (`openrouter_project`, `openrouter_tag`, `spend_alias`, `inject`
   plane paths) is not a secret store. Put rejects secret-shaped values. List,
-  API, and CLI omit them if a file was hand-edited. SafePaste is not a Tokut
-  store; see `docs/tenant-ai-keys.md`.
+  API, and CLI omit them if a file was hand-edited. `consult` / `key_routes`
+  exposes only route presence flags, safe public project/tag/alias values, and
+  Hermes match/drift — never a secret value or a full vault handle. SafePaste is
+  not a Tokut store; see `docs/tenant-ai-keys.md`.
 
 ## Reporting
 

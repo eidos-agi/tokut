@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Knox seam hardening:** `resolve()` / `public_resolve()` / CLI `keys resolve|check` still never unwrap or print a secret. The default knox path stays the `use_invoke` recipe (`knox request` → `approve` → `invoke --env-var … -- <child>`); there is no `knox get`. `knox_runner` remains a unit-test seam only, production never injects one, and runner errors are redacted so a key-shaped value or full vault handle cannot ride out in `detail`. The CLI recursively drops nested `secret` keys from its JSON.
+- **Consult key routes:** `store.consult()` / `GET /api/consult` / `tokut consult` now carry an additive `key_routes` object: tenant, provider, backend (`knox`/`inline`), `is_knox`, presence flags for `openrouter_project` / `openrouter_tag` / `spend_alias` / `inject`, safe public project/tag/alias values, inject plane names, and Hermes `match`/`drift` status. Read-only; never a secret, a full vault handle, or an invented dollar amount.
 - **Tenant AI-keys SoR (D-11):** optional `openrouter_project`, `openrouter_tag`, `spend_alias`, and `inject` plane paths on key slots. Public list/API/CLI still never return a secret. `prims` (Prim Foundation, `spend_alias` `eidos`) and `ridge` (no alias yet) are planned inject planes until kai lists them, not new secret stores. Contract: `docs/tenant-ai-keys.md`.
 - **Keys adapters (D-09 / D-10 steps 1–3):** `KeyStore` load/save accepts `secret` **or** `ref` so vault handles are not dropped. File version 3 when refs are present; v2 plaintext still loads as `inline`.
 - **`inline` backend:** today's plaintext slots. `resolve()` returns the stored secret. `put` + Hermes mirror for `reeves` unchanged.

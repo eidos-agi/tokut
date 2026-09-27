@@ -194,3 +194,47 @@ def test_keys_api_round_trips_spend_metadata_without_secrets(tmp_path: Path) -> 
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_api_consult_includes_key_routes_without_secrets(tmp_path: Path) -> None:
+    server = _server(tmp_path)
+    try:
+        status, data = _request(
+            server,
+            "POST",
+            "/api/keys",
+            {
+                "tenant": "eidos",
+                "provider": "openrouter",
+                "backend": "knox",
+                "ref": "knox:eidos-or-handle",
+                "openrouter_project": "eidos-mgmt",
+                "openrouter_tag": "eidos",
+                "spend_alias": "reeves",
+                "inject": {"paseo_prims": "paseo-prims"},
+                "source": "api",
+            },
+        )
+        assert status == 200
+        assert data["ok"] is True
+
+        status, consult = _request(server, "GET", "/api/consult")
+        assert status == 200
+        payload = consult["key_routes"]
+        assert payload["count"] == 1
+        assert payload["knox_count"] == 1
+        route = payload["routes"][0]
+        assert route["tenant"] == "eidos"
+        assert route["provider"] == "openrouter"
+        assert route["backend"] == "knox"
+        assert route["is_knox"] is True
+        assert route["has_openrouter_project"] is True
+        assert route["has_spend_alias"] is True
+        assert route["inject_planes"] == ["paseo_prims"]
+
+        dumped = json.dumps(consult)
+        assert "eidos-or-handle" not in dumped
+        assert '"secret"' not in dumped
+    finally:
+        server.shutdown()
+        server.server_close()

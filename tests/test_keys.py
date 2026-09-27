@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -11,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import tokut.keys as keys_mod
-from tokut.keys import KeyStore, fingerprint, parse_env_file
+from tokut.keys import KeyStore, fingerprint, parse_env_file, safe_error_detail
 from tokut.tenants import TenantDirectory, parse_kai_tenants
 
 
@@ -356,3 +357,95 @@ def test_import_hermes_does_not_clobber_knox_ref(tmp_path: Path) -> None:
     assert on_disk["keys"]["reeves/deepseek"]["backend"] == "knox"
     assert "secret" not in on_disk["keys"]["reeves/deepseek"]
     assert store.get_secret("deepseek", tenant="reeves") is None
+
+
+def test_safe_error_detail_passthrough_and_redaction() -> None:
+    assert safe_error_detail(RuntimeError("knox not warm")) == "RuntimeError: knox not warm"
+    redacted = safe_error_detail(RuntimeError("token sk-or-v1-secretvalue0000"))
+    assert "secretvalue0000" not in redacted
+    assert "withheld" in redacted
+    handle_redacted = safe_error_detail(RuntimeError("locked knox:bc3fdbe01f704a72"))
+    assert "bc3fdbe01f704a72" not in handle_redacted
+
+
+def test_knox_runner_error_detail_withholds_secret_and_handle(tmp_path: Path) -> None:
+    def runner(ref: str) -> str:
+        raise RuntimeError(f"unlock failed for {ref} near sk-ant-leakleak0000")
+
+    store = KeyStore(
+        path=tmp_path / "keys.json",
+        hermes_env=tmp_path / "hermes.env",
+        tenants=_store(tmp_path).tenants,
+        hermes_tenant="reeves",
+        knox_runner=runner,
+    )
+    store.set_ref(tenant="eidos", provider="deepseek", ref="knox:bc3fdbe01f704a72")
+    result = store.resolve("deepseek", tenant="eidos")
+    dumped = json.dumps(result)
+    assert result["ok"] is False
+    assert result["error"] == "needs_unlock"
+    assert result["detail"]
+    assert "leakleak0000" not in dumped
+    assert "bc3fdbe01f704a72" not in dumped
+    assert "knox:" not in result["detail"]
+    # The public/CLI view never consults the runner at all.
+    assert store.public_resolve("deepseek", tenant="eidos")["error"] == "use_invoke"
+
+
+def test_knox_runner_empty_result_is_needs_unlock_without_secret(tmp_path: Path) -> None:
+    store = KeyStore(
+        path=tmp_path / "keys.json",
+        hermes_env=tmp_path / "hermes.env",
+        tenants=_store(tmp_path).tenants,
+        hermes_tenant="reeves",
+        knox_runner=lambda ref: "   ",
+    )
+    store.set_ref(tenant="eidos", provider="deepseek", ref="knox:bc3fdbe01f704a72")
+    result = store.resolve("deepseek", tenant="eidos")
+    assert result["error"] == "needs_unlock"
+    assert result["detail"]
+    assert result["ok"] is False
+    assert "secret" not in result
+
+
+def test_knox_missing_ref_public_view_never_leaks_stored_secret(tmp_path: Path) -> None:
+    """A hand-edited file may keep a secret on a knox slot. Public paths must not."""
+    store = _store(tmp_path)
+    store.path.write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "keys": {
+                    "eidos/nvidia": {
+                        "tenant": "eidos",
+                        "provider": "nvidia",
+                        "backend": "knox",
+                        "secret": "nvapi-hand-edited-secret0000",
+                        "env_var": "NVIDIA_API_KEY",
+                    }
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    report = store.public_resolve("nvidia", tenant="eidos")
+    dumped = json.dumps(report)
+    assert report["backend"] == "knox"
+    assert report["error"] == "missing_ref"
+    assert report["ref"] == ""
+    assert "secret" not in report
+    assert "hand-edited-secret0000" not in dumped
+    assert store.slot_check_ok(report) is False
+    assert "hand-edited-secret0000" not in json.dumps(store.list_public())
+    assert store.get_secret("nvidia", tenant="eidos") is None
+    # The library knox resolve path stays use_invoke/missing_ref too.
+    assert store.resolve("nvidia", tenant="eidos")["error"] == "missing_ref"
+
+
+def test_production_server_never_injects_knox_runner() -> None:
+    source = (ROOT / "tokut" / "server.py").read_text(encoding="utf-8")
+    assert "knox_runner" not in source
+    assert re.search(r"store\.resolve\(", source) is None
+    assert "public_resolve" in source
+

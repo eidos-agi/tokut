@@ -8,6 +8,7 @@ import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import __version__
@@ -199,6 +200,7 @@ def build_server(
     keys_file: Path | None = None,
     hermes_env: Path | None = None,
 ) -> ThreadingHTTPServer:
+    keys = KeyStore(path=keys_file or DEFAULT_KEYS_FILE, hermes_env=hermes_env)
     store = TokenBurnStore(
         codex_home=codex_home,
         codex_roots=codex_roots,
@@ -211,6 +213,7 @@ def build_server(
         local_user=local_user,
         pricing_file=pricing_file,
         subscriptions_file=subscriptions_file,
+        key_routes=keys.consult_routes,
     )
     store.refresh()
 
@@ -218,7 +221,7 @@ def build_server(
         pass
 
     Handler.store = store
-    Handler.keys = KeyStore(path=keys_file or DEFAULT_KEYS_FILE, hermes_env=hermes_env)
+    Handler.keys = keys
     Handler.poll_seconds = poll_seconds
     return ThreadingHTTPServer((host, port), Handler)
 
@@ -327,6 +330,7 @@ def main() -> None:
         return
 
     if args.command == "consult":
+        keys = KeyStore(path=runtime["keys_file"], hermes_env=runtime["hermes_env"])
         store = TokenBurnStore(
             codex_home=runtime["codex_home"],
             codex_roots=runtime["codex_roots"],
@@ -339,6 +343,7 @@ def main() -> None:
             local_user=runtime["local_user"],
             pricing_file=runtime["pricing_file"],
             subscriptions_file=runtime["subscriptions_file"],
+            key_routes=keys.consult_routes,
         )
         store.refresh()
         print(json.dumps(store.consult(), indent=2))
@@ -418,9 +423,17 @@ def _run_keys_resolve(store: KeyStore, args: argparse.Namespace, *, check: bool)
 
 
 def _safe_keys_json(payload: dict) -> str:
-    """Serialize keys CLI output. Drop any secret field if a caller slipped."""
-    cleaned = {key: value for key, value in payload.items() if key != "secret"}
-    return json.dumps(cleaned, indent=2)
+    """Serialize keys CLI output. Drop any nested secret field if a caller slipped."""
+    return json.dumps(_strip_secret_keys(payload), indent=2)
+
+
+def _strip_secret_keys(value: Any) -> Any:
+    """Recursively remove ``secret`` keys so no CLI path can print one."""
+    if isinstance(value, dict):
+        return {key: _strip_secret_keys(item) for key, item in value.items() if key != "secret"}
+    if isinstance(value, list):
+        return [_strip_secret_keys(item) for item in value]
+    return value
 
 
 def _put_key_from_cli(store: KeyStore, args: argparse.Namespace) -> dict:

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from tokut.keys import KeyStore, fingerprint
+from tokut.server import _safe_keys_json
 from tokut.tenants import TenantDirectory
 
 
@@ -117,3 +118,17 @@ def test_cli_resolve_missing_slot_exits_nonzero(tmp_path: Path) -> None:
     report = json.loads(result.stdout)
     assert report["error"] == "not_found"
     assert "secret" not in report
+
+
+def test_safe_keys_json_recursively_drops_secret_keys() -> None:
+    report = {
+        "provider": "openrouter",
+        "secret": "sk-or-v1-toplevel0000",
+        "nested": {"secret": "sk-or-v1-nested0000", "last4": "0000"},
+        "rows": [{"secret": "sk-or-v1-list0000", "ok": True}],
+    }
+    dumped = _safe_keys_json(report)
+    assert "sk-or-v1" not in dumped
+    parsed = json.loads(dumped)
+    assert parsed["nested"] == {"last4": "0000"}
+    assert parsed["rows"] == [{"ok": True}]

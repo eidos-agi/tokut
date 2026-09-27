@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .key_meta import PLANNED_INJECT_PLANES, UNSET, safe_slot_meta, slot_metadata
+from .key_meta import PLANNED_INJECT_PLANES, UNSET, looks_like_secret, safe_slot_meta, slot_metadata
 from .tenants import DEFAULT_HERMES_TENANT, UNSCOPED, TenantDirectory
 
 DEFAULT_KEYS_FILE = Path("~/.config/tokut/keys.json").expanduser()
@@ -120,6 +120,20 @@ def knox_inject_recipe(env_var: str | None = None) -> dict[str, Any]:
     }
 
 
+def safe_error_detail(exc: BaseException) -> str:
+    """Error text for resolve reports that never echoes secret material.
+
+    ``knox_runner`` is a test seam, but a runner error must not leak a key or a
+    full vault handle into a report. Secret-shaped text and ``knox:`` handles
+    are replaced with a fixed phrase; other short errors pass through.
+    """
+    kind = type(exc).__name__
+    text = str(exc).strip()
+    if not text or looks_like_secret(text) or "knox:" in text:
+        return f"{kind}: knox runner failed; detail withheld (may contain secret material)"
+    return f"{kind}: {text[:200]}"
+
+
 def slot_has_material(record: dict[str, Any]) -> bool:
     secret = str(record.get("secret") or "").strip()
     ref = str(record.get("ref") or "").strip()
@@ -219,6 +233,7 @@ Do not invent a sixth tenant. Do not copy secrets across tenants.
 - Provenance: source, source_path, created_at, rotated_at, history, hermes match/drift.
 - Optional SoR fields (never secrets): openrouter_project, openrouter_tag, spend_alias on openrouter slots; inject plane paths (dsh_credentials, paseo_prims). See docs/tenant-ai-keys.md.
 - prims and ridge are planned inject planes until kai lists them. Prim Foundation spend_alias is eidos. Do not open a secret store for them.
+- consult `key_routes` (and dashboard `consult.key_routes`): tenant/provider/backend + presence flags for openrouter_project, openrouter_tag, spend_alias, inject, plus Hermes match/drift. Never a secret, a full vault handle, or an invented dollar amount.
 """
 
 
@@ -334,6 +349,27 @@ class KeyStore:
             return None
         secret = str(record.get("secret") or "").strip()
         return secret or None
+
+    def consult_routes(self, tenant: str | None = None) -> dict[str, Any]:
+        """Read-only slot routes for consult/dashboard. Presence flags, no secrets.
+
+        Reuses ``list_public`` so the projection matches what the API and UI
+        already trust. Never unwraps Knox, never writes, and never includes a
+        secret or a full vault handle.
+        """
+        routes = [_public_key_route(row) for row in self.list_public(tenant)]
+        drift = sorted(
+            f"{row['tenant']}/{row['provider']}"
+            for row in routes
+            if row.get("hermes_status") == "drift"
+        )
+        return {
+            "routes": routes,
+            "count": len(routes),
+            "knox_count": sum(1 for row in routes if row.get("is_knox")),
+            "hermes_drift": drift,
+            "note": _key_routes_note(drift),
+        }
 
     def _get_record(self, provider: str, tenant: str | None = None) -> dict[str, Any] | None:
         pid = _normalize_provider(provider)
@@ -510,9 +546,9 @@ class KeyStore:
         try:
             secret = self._knox_runner(ref)
         except KnoxNeedsUnlock as exc:
-            return {**base, "error": "needs_unlock", "detail": str(exc)}
+            return {**base, "error": "needs_unlock", "detail": safe_error_detail(exc)}
         except Exception as exc:
-            return {**base, "error": "needs_unlock", "detail": str(exc)}
+            return {**base, "error": "needs_unlock", "detail": safe_error_detail(exc)}
         cleaned = str(secret or "").strip()
         if not cleaned:
             return {**base, "error": "needs_unlock", "detail": "injected knox_runner returned empty"}
@@ -929,6 +965,38 @@ def _public_inline_view(
     if env_var:
         payload["env_var"] = env_var
     return payload
+
+
+def _public_key_route(row: dict[str, Any]) -> dict[str, Any]:
+    """Compact, secret-free route row for consult/dashboard ``key_routes``."""
+    backend = str(row.get("backend") or "").strip()
+    inject = row.get("inject") if isinstance(row.get("inject"), dict) else {}
+    hermes = row.get("hermes") if isinstance(row.get("hermes"), dict) else {}
+    return {
+        "tenant": row.get("tenant"),
+        "provider": row.get("provider"),
+        "backend": backend,
+        "is_knox": backend == BACKEND_KNOX,
+        "has_openrouter_project": bool(row.get("openrouter_project")),
+        "has_openrouter_tag": bool(row.get("openrouter_tag")),
+        "has_spend_alias": bool(row.get("spend_alias")),
+        "has_inject": bool(inject),
+        "openrouter_project": row.get("openrouter_project"),
+        "openrouter_tag": row.get("openrouter_tag"),
+        "spend_alias": row.get("spend_alias"),
+        "inject_planes": sorted(str(key) for key in inject),
+        "hermes_status": hermes.get("status"),
+    }
+
+
+def _key_routes_note(drift: list[str]) -> str | None:
+    if not drift:
+        return None
+    return (
+        "Hermes mirror drift on "
+        + ", ".join(drift)
+        + " (public status only; no secret value)."
+    )
 
 
 def _knox_resolve_base(record: dict[str, Any], *, tenant: str, provider: str) -> tuple[str, str, dict[str, Any]]:
