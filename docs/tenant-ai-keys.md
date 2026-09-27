@@ -2,7 +2,7 @@
 
 D-11. Tokut is the system of record for tenant AI-key **refs** and inject **recipes**. Fort Knox keeps the secret. This page is the contract for DeepSeek on paseo-prims and for per-tenant OpenRouter spend walls.
 
-Compatibility: D-10 steps 5–6 (`keys resolve` / `--check`, `/keys` backend + handle) sit on this SoR. `public_resolve`, `GET /api/keys`, and the keys list show `openrouter_project`, `openrouter_tag`, `spend_alias`, and `inject` and never a secret. A keys-page save that omits those fields leaves them in place. POST `{backend, ref}` still accepts the same metadata fields as `tokut keys put`.
+Compatibility: D-10 steps 5–6 (`keys resolve` / `--check`, `/keys` backend + handle) sit on this SoR. `public_resolve`, `GET /api/keys`, and the keys list show `openrouter_project`, `openrouter_tag`, `spend_alias`, and `inject` and never a secret. A keys-page save that omits those fields leaves them in place. POST `{backend, ref}` still accepts the same metadata fields as `tokut keys put`. `consult` / `GET /api/consult` / `tokut consult` surface the same slots as a read-only `key_routes` object: tenant, provider, backend, metadata presence flags, safe public project/tag/alias values, inject plane names, and Hermes match/drift. No secret, no full vault handle, no invented dollars.
 
 Live inventory observed 2026-09-05, handles only, not migrated by this change:
 

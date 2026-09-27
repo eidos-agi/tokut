@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from getpass import getuser
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import DEFAULT_PRICING_FILE, DEFAULT_SUBSCRIPTIONS_FILE
 from .parser import (
@@ -193,6 +193,7 @@ class TokenBurnStore:
         local_user: str | None = None,
         pricing_file: Path | None = None,
         subscriptions_file: Path | None = None,
+        key_routes: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.codex_home = Path(codex_home or os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
         self.codex_roots = codex_roots if codex_roots is not None else _roots_from_env("CODEX_TOKEN_BURN_ROOTS", self.codex_home)
@@ -216,6 +217,9 @@ class TokenBurnStore:
         self._version = 0
         self._last_discovery = 0.0
         self._files: list[Path] = []
+        # Read-only key-route provider (usually KeyStore.consult_routes). Optional
+        # so tests and non-keys callers never touch ~/.config/tokut/keys.json.
+        self._key_routes = key_routes
 
     @property
     def version(self) -> int:
@@ -421,7 +425,27 @@ class TokenBurnStore:
             ],
             "actions": actions,
             "warning": billing.get("warning"),
+            "key_routes": self._key_routes_payload(),
         }
+
+    def _key_routes_payload(self) -> dict[str, Any]:
+        """Additive key-slot route summary. Read-only; no secrets or dollars."""
+        empty = {
+            "routes": [],
+            "count": 0,
+            "knox_count": 0,
+            "hermes_drift": [],
+            "note": None,
+        }
+        if self._key_routes is None:
+            return {**empty, "note": "keys store not wired to consult"}
+        try:
+            payload = self._key_routes()
+        except Exception as exc:  # defensive: consult must not crash
+            return {**empty, "note": f"key routes unavailable: {type(exc).__name__}"}
+        if not isinstance(payload, dict):
+            return {**empty, "note": "key routes unavailable: bad payload"}
+        return {**empty, **payload}
 
     def _discover_files(self) -> None:
         now = time.monotonic()
