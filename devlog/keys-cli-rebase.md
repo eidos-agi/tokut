@@ -19,4 +19,4 @@
 - [x] Conflict resolution keeps D-10 steps 5–6 and D-11 fields
 - [x] CHANGELOG notes the rebase
 - [x] Tests green (`python3 -m pytest` — 49 passed), including no secret in resolve stdout
-- [ ] Keys page checked in the browser with a temp keys file (no live secrets)
+- [x] Keys page checked in the browser with a temp keys file (no live secrets): backend toggle, knox save, masked list row, SoR metadata and planned planes visible
